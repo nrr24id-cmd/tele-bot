@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>History</h1>
+{% if submitted %}
+<p>Request #{{ submitted }} dikirim. Status akan update otomatis.</p>
+<script>
+(function poll() {
+  fetch('/api/request/{{ submitted }}/status')
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'pending' || d.status === 'processing') {
+        setTimeout(poll, 3000);
+      } else { location.reload(); }
+    });
+})();
+</script>
+{% endif %}
+<table border="1" cellpadding="6">
+  <tr><th>#</th><th>Produk</th><th>SN</th><th>Status</th><th>Reply</th><th>Harga</th><th>Waktu</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.id }}</td><td>{{ r.product_name }}</td><td>{{ r.sn }}</td>
+    <td>{{ r.status }}</td><td>{{ r.reply_text or r.error_text or '-' }}</td>
+    <td>Rp {{ "{:,.0f}".format(r.price_charged) }}</td><td>{{ r.created_at }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

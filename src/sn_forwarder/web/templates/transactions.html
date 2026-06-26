@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Riwayat Transaksi</h1>
+<p>Saldo saat ini: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
+<table border="1" cellpadding="6">
+  <tr><th>#</th><th>Tipe</th><th>Jumlah</th><th>Saldo Setelah</th><th>Ref</th><th>Waktu</th></tr>
+  {% for t in txns %}
+  <tr>
+    <td>{{ t.id }}</td><td>{{ t.type }}</td>
+    <td>Rp {{ "{:,.0f}".format(t.amount) }}</td>
+    <td>Rp {{ "{:,.0f}".format(t.balance_after) }}</td>
+    <td>{{ t.ref_request_id or '-' }}</td><td>{{ t.created_at }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
