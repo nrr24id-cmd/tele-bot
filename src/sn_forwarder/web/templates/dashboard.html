@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dashboard</h1>
+<p>Selamat datang, <strong>{{ user.username }}</strong></p>
+<p>Saldo: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
+<a href="/order"><button>Order Baru</button></a>
+{% endblock %}
