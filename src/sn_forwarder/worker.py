@@ -5,43 +5,39 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from .balance import BalanceService
 from .store import RequestStore
-from .target_client import TargetClientProtocol
 
 logger = logging.getLogger(__name__)
 
 
-class SettingsProtocol(Protocol):
-    reply_timeout_seconds: float
-
-    def render_target_command(self, sn: str) -> str:
-        ...
-
-
-class OutboundBotProtocol(Protocol):
-    async def send_message(self, chat_id: int, text: str) -> object:
+class TargetClientProtocol(Protocol):
+    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
         ...
 
 
 @dataclass(frozen=True)
 class RegistrationJob:
+    request_id: int
     user_id: int
-    chat_id: int
+    product_id: int
     sn: str
+    button_label: str
+    price_charged: int
 
 
 class RegistrationWorker:
     def __init__(
         self,
-        settings: SettingsProtocol,
         store: RequestStore,
+        balance: BalanceService,
         target_client: TargetClientProtocol,
-        bot: OutboundBotProtocol | None,
+        reply_timeout_seconds: float,
     ) -> None:
-        self.settings = settings
         self.store = store
+        self.balance = balance
         self.target_client = target_client
-        self.bot = bot
+        self.reply_timeout_seconds = reply_timeout_seconds
         self.queue: asyncio.Queue[RegistrationJob] = asyncio.Queue()
 
     async def enqueue(self, job: RegistrationJob) -> int:
@@ -53,31 +49,23 @@ class RegistrationWorker:
             job = await self.queue.get()
             try:
                 await self.process_one(job)
+            except Exception:
+                logger.exception("Unexpected error processing job %s", job.request_id)
             finally:
                 self.queue.task_done()
 
-    async def process_one(self, job: RegistrationJob) -> int:
-        command = self.settings.render_target_command(job.sn)
-        request_id = self.store.create_request(job.user_id, job.chat_id, job.sn, command)
-        self.store.mark_sent(request_id)
-
+    async def process_one(self, job: RegistrationJob) -> None:
+        self.store.mark_sent(job.request_id)
         try:
-            reply = await self.target_client.send_and_wait(command, self.settings.reply_timeout_seconds)
+            reply = await self.target_client.send_and_wait(
+                job.button_label, job.sn, self.reply_timeout_seconds
+            )
         except asyncio.TimeoutError:
-            self.store.mark_failed(request_id, "timeout")
-            await self._send(job.chat_id, "Timeout: bot tujuan tidak membalas.")
+            self.store.mark_failed(job.request_id, "timeout")
+            self.balance.refund(job.user_id, job.price_charged, job.request_id)
         except Exception as exc:
-            logger.exception("Registration request %s failed", request_id)
-            self.store.mark_failed(request_id, str(exc))
-            await self._send(job.chat_id, "Gagal memproses request. Cek log aplikasi.")
+            logger.exception("Registration request %s failed", job.request_id)
+            self.store.mark_failed(job.request_id, str(exc))
+            self.balance.refund(job.user_id, job.price_charged, job.request_id)
         else:
-            self.store.mark_success(request_id, reply)
-            await self._send(job.chat_id, reply or "Bot tujuan membalas tanpa teks.")
-
-        return request_id
-
-    async def _send(self, chat_id: int, text: str) -> None:
-        if self.bot is None:
-            raise RuntimeError("Outbound bot is not configured")
-        await self.bot.send_message(chat_id, text)
-
+            self.store.mark_success(job.request_id, reply or "Bot tujuan membalas tanpa teks.")

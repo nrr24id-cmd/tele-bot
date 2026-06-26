@@ -1,64 +1,76 @@
 import asyncio
-
 import pytest
-
-from sn_forwarder.store import RequestStore
+from sn_forwarder.balance import BalanceService
+from sn_forwarder.store import ProductStore, RequestStore, UserStore
 from sn_forwarder.worker import RegistrationJob, RegistrationWorker
-
-
-class FakeSettings:
-    reply_timeout_seconds = 0.01
-
-    def render_target_command(self, sn: str) -> str:
-        return f"/register {sn}"
 
 
 class FakeTargetClient:
     def __init__(self, reply: str | Exception) -> None:
         self.reply = reply
-        self.commands: list[str] = []
+        self.calls: list[tuple[str, str]] = []
 
-    async def send_and_wait(self, command: str, timeout_seconds: float) -> str:
-        self.commands.append(command)
+    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
+        self.calls.append((button_label, sn))
         if isinstance(self.reply, Exception):
             raise self.reply
         return self.reply
 
 
-class FakeBot:
-    def __init__(self) -> None:
-        self.messages: list[tuple[int, str]] = []
-
-    async def send_message(self, chat_id: int, text: str) -> object:
-        self.messages.append((chat_id, text))
-        return object()
+def make_worker(tmp_path, reply: str | Exception = "OK"):
+    db = str(tmp_path / "db.sqlite3")
+    users = UserStore(db)
+    products = ProductStore(db)
+    uid = users.create_user("alice", "hash")
+    users._add_balance(uid, 200000)
+    pid = products.create_product("A12+", "Amrr Activator Pro Tool A12+", 50000)
+    store = RequestStore(db)
+    balance = BalanceService(db)
+    rid = store.create_order(uid, pid, "SN123", 50000)
+    job = RegistrationJob(
+        request_id=rid,
+        user_id=uid,
+        product_id=pid,
+        sn="SN123",
+        button_label="Amrr Activator Pro Tool A12+",
+        price_charged=50000,
+    )
+    target = FakeTargetClient(reply)
+    worker = RegistrationWorker(store, balance, target, reply_timeout_seconds=5.0)
+    return worker, job, store, users, uid
 
 
 @pytest.mark.asyncio
-async def test_worker_sends_command_and_returns_reply(tmp_path):
-    store = RequestStore(str(tmp_path / "requests.sqlite3"))
-    target = FakeTargetClient("Register sukses")
-    bot = FakeBot()
-    worker = RegistrationWorker(FakeSettings(), store, target, bot)
-
-    request_id = await worker.process_one(RegistrationJob(user_id=111, chat_id=222, sn="SN123"))
-
-    assert target.commands == ["/register SN123"]
-    assert bot.messages == [(222, "Register sukses")]
-    assert store.get_request(request_id).status == "success"
+async def test_worker_success(tmp_path):
+    worker, job, store, users, uid = make_worker(tmp_path, "Aktivasi berhasil")
+    await worker.process_one(job)
+    assert store.get_request(job.request_id).status == "success"
+    assert store.get_request(job.request_id).reply_text == "Aktivasi berhasil"
+    assert users.get_by_id(uid).balance == 150000  # saldo tidak dikembalikan
 
 
 @pytest.mark.asyncio
-async def test_worker_reports_timeout(tmp_path):
-    store = RequestStore(str(tmp_path / "requests.sqlite3"))
-    target = FakeTargetClient(asyncio.TimeoutError())
-    bot = FakeBot()
-    worker = RegistrationWorker(FakeSettings(), store, target, bot)
+async def test_worker_timeout_refunds(tmp_path):
+    worker, job, store, users, uid = make_worker(tmp_path, asyncio.TimeoutError())
+    await worker.process_one(job)
+    assert store.get_request(job.request_id).status == "failed"
+    assert users.get_by_id(uid).balance == 200000  # saldo dikembalikan
 
-    request_id = await worker.process_one(RegistrationJob(user_id=111, chat_id=222, sn="SN123"))
 
-    assert bot.messages == [(222, "Timeout: bot tujuan tidak membalas.")]
-    record = store.get_request(request_id)
-    assert record.status == "failed"
-    assert record.error_text == "timeout"
+@pytest.mark.asyncio
+async def test_worker_error_refunds(tmp_path):
+    worker, job, store, users, uid = make_worker(tmp_path, RuntimeError("koneksi gagal"))
+    await worker.process_one(job)
+    assert store.get_request(job.request_id).status == "failed"
+    assert users.get_by_id(uid).balance == 200000
 
+
+@pytest.mark.asyncio
+async def test_worker_enqueue_returns_qsize(tmp_path):
+    db = str(tmp_path / "db.sqlite3")
+    store = RequestStore(db)
+    balance = BalanceService(db)
+    worker = RegistrationWorker(store, balance, FakeTargetClient("ok"), reply_timeout_seconds=5.0)
+    job = RegistrationJob(1, 1, 1, "SN", "btn", 50000)
+    size = await worker.enqueue(job)
+    assert size == 1
