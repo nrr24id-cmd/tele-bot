@@ -1,65 +1,72 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 
+import uvicorn
 from telethon import TelegramClient
 
-from .bot_app import build_application
+from .balance import BalanceService
 from .config import load_settings
-from .store import RequestStore
+from .store import ProductStore, RequestStore, UserStore
 from .target_client import TelethonTargetClient
+from .web.app import build_web_app
 from .worker import RegistrationWorker
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
 
-async def async_main() -> None:
+async def main() -> None:
     settings = load_settings()
-    store = RequestStore(settings.database_path)
+
+    user_store = UserStore(settings.database_path)
+    product_store = ProductStore(settings.database_path)
+    request_store = RequestStore(settings.database_path)
+    balance_service = BalanceService(settings.database_path)
 
     telethon_client = TelegramClient(
         settings.telethon_session_name,
         settings.api_id,
         settings.api_hash,
     )
+    await telethon_client.start()
+    logger.info("Telethon connected")
 
-    async with telethon_client:
-        target_client = TelethonTargetClient(telethon_client, settings.target_bot_username)
-        worker = RegistrationWorker(settings, store, target_client, bot=None)
-        app = build_application(settings, worker)
-        worker.bot = app.bot
+    target_client = TelethonTargetClient(telethon_client, settings.target_bot_username)
 
-        worker_task = asyncio.create_task(worker.run_forever())
-        try:
-            await app.initialize()
-            await app.start()
-            if app.updater is None:
-                raise RuntimeError("Telegram bot updater is not available")
-            await app.updater.start_polling()
-            logging.info("Bot is running. Press Ctrl+C to stop.")
-            await asyncio.Event().wait()
-        finally:
-            worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await worker_task
-            if app.updater is not None and app.updater.running:
-                await app.updater.stop()
-            if app.running:
-                await app.stop()
-            await app.shutdown()
+    worker = RegistrationWorker(
+        store=request_store,
+        balance=balance_service,
+        target_client=target_client,
+        reply_timeout_seconds=settings.reply_timeout_seconds,
+    )
 
+    app = build_web_app(
+        settings=settings,
+        user_store=user_store,
+        product_store=product_store,
+        request_store=request_store,
+        balance_service=balance_service,
+        worker=worker,
+    )
 
-def main() -> None:
-    asyncio.run(async_main())
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=settings.web_host,
+        port=settings.web_port,
+        log_level="info",
+    )
+    server = uvicorn.Server(uvicorn_config)
+
+    logger.info("Starting SN Forwarder Platform on http://%s:%d", settings.web_host, settings.web_port)
+    await asyncio.gather(
+        server.serve(),
+        worker.run_forever(),
+    )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

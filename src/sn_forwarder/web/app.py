@@ -43,8 +43,7 @@ def build_web_app(
     (TEMPLATES_DIR / "admin").mkdir(exist_ok=True)
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
-    if STATIC_DIR.exists() and any(STATIC_DIR.iterdir()):
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     app.state.user_store = user_store
     app.state.product_store = product_store
@@ -66,7 +65,7 @@ def build_web_app(
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request):
         csrf = get_csrf_token(request)
-        return templates.TemplateResponse("login.html", {"request": request, "csrf_token": csrf, "error": None})
+        return templates.TemplateResponse(request, "login.html", {"csrf_token": csrf, "error": None})
 
     @app.post("/login")
     async def login_post(request: Request):
@@ -78,8 +77,9 @@ def build_web_app(
         if is_brute_forced(ip):
             csrf = get_csrf_token(request)
             return templates.TemplateResponse(
+                request,
                 "login.html",
-                {"request": request, "csrf_token": csrf, "error": "Terlalu banyak percobaan. Tunggu 5 menit."},
+                {"csrf_token": csrf, "error": "Terlalu banyak percobaan. Tunggu 5 menit."},
                 status_code=429,
             )
 
@@ -88,8 +88,9 @@ def build_web_app(
             record_failed(ip)
             csrf = get_csrf_token(request)
             return templates.TemplateResponse(
+                request,
                 "login.html",
-                {"request": request, "csrf_token": csrf, "error": "Username atau password salah."},
+                {"csrf_token": csrf, "error": "Username atau password salah."},
                 status_code=200,
             )
 

@@ -1,110 +1,70 @@
-# Telegram SN Forwarder Bot
+# SN Forwarder Platform
 
-Bot ini berjalan di PC Windows Anda. Bot menerima `/reg <SN>`, mengirim command register ke bot Telegram tujuan memakai akun Telegram Anda melalui Telethon, lalu mengirim reply bot tujuan kembali ke user atau panel.
+Panel web multi-user untuk submit request ke bot Telegram via Telethon. Satu proses Python (FastAPI + Worker + Telethon) di PC lokal, diakses publik via Cloudflare Tunnel.
 
-## Cara Kerja
+## Setup
 
-```text
-User / Panel -> Bot Telegram Anda -> Queue lokal -> Akun Telegram Anda via Telethon -> Bot tujuan
-Bot tujuan -> Akun Telegram Anda via Telethon -> Bot Telegram Anda -> User / Panel
-```
-
-Request diproses satu per satu supaya reply dari bot tujuan tidak tertukar.
-
-## Setup Windows
-
-1. Install Python 3.11 atau lebih baru dari https://www.python.org/downloads/windows/.
-2. Buka PowerShell di folder project ini.
-3. Buat virtual environment:
+### 1. Install dependensi
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\pip install -r requirements.txt
 ```
 
-Jika PowerShell menolak aktivasi script, jalankan:
+### 2. Konfigurasi `.env`
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Buat file `.env` di root project:
+
 ```
-
-Lalu ulangi aktivasi virtual environment.
-
-4. Install dependency:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-5. Copy `.env.example` menjadi `.env`.
-6. Isi `.env`:
-
-```text
-BOT_TOKEN=token_dari_botfather
-API_ID=api_id_dari_my_telegram_org
-API_HASH=api_hash_dari_my_telegram_org
-OWNER_USER_IDS=user_id_telegram_anda
-TARGET_BOT_USERNAME=@username_bot_tujuan
-TARGET_COMMAND_TEMPLATE=/register {sn}
-REPLY_TIMEOUT_SECONDS=60
-DATABASE_PATH=data/requests.sqlite3
+API_ID=12345
+API_HASH=abcdef...
+TARGET_BOT_USERNAME=@NamaBotTujuan
 TELETHON_SESSION_NAME=owner_session
+REPLY_TIMEOUT_SECONDS=60
+SESSION_SECRET=string_acak_panjang_min32karakter
+WEB_HOST=127.0.0.1
+WEB_PORT=8000
+DATABASE_PATH=sn_panel.db
 ```
 
-## Mengambil Credential Telegram
-
-- `BOT_TOKEN`: buat bot di BotFather, lalu copy token.
-- `API_ID` dan `API_HASH`: login ke https://my.telegram.org, buka API development tools, lalu buat app.
-- `OWNER_USER_IDS`: user ID Telegram yang boleh memakai bot. Anda bisa cek lewat bot seperti `@userinfobot`.
-- `TARGET_BOT_USERNAME`: username bot Telegram tujuan, diawali `@`.
-
-## Menjalankan Bot
-
-Aktifkan virtual environment dulu:
-
+Generate `SESSION_SECRET`:
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Jalankan:
+### 3. Buat admin pertama
 
 ```powershell
 $env:PYTHONPATH='src'
-python -m sn_forwarder.main
+.\.venv\Scripts\python -m sn_forwarder.setup_admin
 ```
 
-Saat pertama kali berjalan, Telethon akan meminta nomor HP Telegram, kode login, dan password 2FA jika aktif. Setelah login berhasil, file `owner_session.session` dibuat lokal. Login berikutnya tidak perlu kode lagi selama file session tidak dihapus.
+### 4. Jalankan aplikasi
 
-Bot hanya aktif selama terminal tetap terbuka, PC hidup, dan internet tersambung.
-
-## Command
-
-```text
-/start
-/reg SN123456
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python -m sn_forwarder.main
 ```
 
-Jika bot tujuan memakai format lain, ubah `TARGET_COMMAND_TEMPLATE` di `.env`.
+### 5. Akses publik via Cloudflare Tunnel
 
-Contoh:
-
-```text
-TARGET_COMMAND_TEMPLATE=/reg {sn}
-TARGET_COMMAND_TEMPLATE=REGISTER {sn}
+Di terminal terpisah:
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8000
 ```
 
-## Data Lokal
+URL HTTPS muncul di terminal Cloudflare (mis. `https://xxxx.trycloudflare.com`).
 
-- SQLite log request default: `data/requests.sqlite3`.
-- Telethon session default: `owner_session.session`.
-- `.env`, database, dan session file sudah masuk `.gitignore`.
+## Penggunaan
 
-Jangan kirim file `.env` atau `.session` ke orang lain karena bisa berisi akses akun.
+- Admin login → `/admin/users` → tambah user + set saldo
+- Admin → `/admin/products` → tambah produk (nama, button_label PERSIS di bot tujuan, harga)
+- User login → `/order` → pilih produk, isi SN → submit
+- Hasil muncul di `/history` (polling otomatis tiap 3 detik)
+- Saldo dipotong saat submit; refund otomatis jika gagal/timeout
 
-## Troubleshooting
+## Menjalankan tes
 
-- `Akses ditolak.`: user ID pengirim belum masuk `OWNER_USER_IDS`.
-- `Format: /reg <SN>`: command kurang SN.
-- `Timeout: bot tujuan tidak membalas.`: bot tujuan lambat, tidak aktif, atau format command salah.
-- `Gagal memproses request. Cek log aplikasi.`: lihat error di terminal PowerShell.
-
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python -m pytest -q
+```

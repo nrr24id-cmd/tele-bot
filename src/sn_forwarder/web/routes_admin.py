@@ -14,7 +14,7 @@ async def admin_users(request: Request):
     users = request.app.state.user_store.list_all()
     csrf = get_csrf_token(request)
     return request.app.state.templates.TemplateResponse(
-        "admin/users.html", {"request": request, "users": users, "csrf_token": csrf}
+        request, "admin/users.html", {"users": users, "csrf_token": csrf}
     )
 
 
@@ -55,7 +55,7 @@ async def admin_products(request: Request):
     products = request.app.state.product_store.list_all()
     csrf = get_csrf_token(request)
     return request.app.state.templates.TemplateResponse(
-        "admin/products.html", {"request": request, "products": products, "csrf_token": csrf}
+        request, "admin/products.html", {"products": products, "csrf_token": csrf}
     )
 
 
@@ -90,5 +90,5 @@ async def admin_history(request: Request):
     require_admin(request, request.app.state.user_store)
     rows = request.app.state.request_store.get_all(limit=100)
     return request.app.state.templates.TemplateResponse(
-        "admin/history.html", {"request": request, "rows": rows}
+        request, "admin/history.html", {"rows": rows}
     )

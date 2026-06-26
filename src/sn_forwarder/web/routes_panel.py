@@ -14,7 +14,7 @@ async def dashboard(request: Request):
     user = require_user(request, request.app.state.user_store)
     fresh = request.app.state.user_store.get_by_id(user.id)
     return request.app.state.templates.TemplateResponse(
-        "dashboard.html", {"request": request, "user": fresh}
+        request, "dashboard.html", {"user": fresh}
     )
 
 
@@ -24,8 +24,9 @@ async def order_page(request: Request):
     products = request.app.state.product_store.list_active()
     csrf = get_csrf_token(request)
     return request.app.state.templates.TemplateResponse(
+        request,
         "order.html",
-        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": None},
+        {"user": user, "products": products, "csrf_token": csrf, "error": None},
     )
 
 
@@ -76,7 +77,7 @@ async def history(request: Request):
     rows = request.app.state.request_store.get_by_user(user.id, limit=50)
     submitted = request.query_params.get("submitted")
     return request.app.state.templates.TemplateResponse(
-        "history.html", {"request": request, "user": user, "rows": rows, "submitted": submitted}
+        request, "history.html", {"user": user, "rows": rows, "submitted": submitted}
     )
 
 
@@ -86,7 +87,7 @@ async def transactions(request: Request):
     fresh = request.app.state.user_store.get_by_id(user.id)
     txns = request.app.state.balance_service.get_transactions(user.id)
     return request.app.state.templates.TemplateResponse(
-        "transactions.html", {"request": request, "user": fresh, "txns": txns}
+        request, "transactions.html", {"user": fresh, "txns": txns}
     )
 
 
@@ -106,7 +107,8 @@ def _order_error(request: Request, user, message: str):
     products = request.app.state.product_store.list_active()
     csrf = get_csrf_token(request)
     return request.app.state.templates.TemplateResponse(
+        request,
         "order.html",
-        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": message},
+        {"user": user, "products": products, "csrf_token": csrf, "error": message},
         status_code=200,
     )

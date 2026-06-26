@@ -1,13 +1,22 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>SN Panel</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SN Panel</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
 <nav>
-  <a href="/dashboard">Dashboard</a> |
-  <a href="/order">Order</a> |
-  <a href="/history">History</a> |
+  <a href="/dashboard">Dashboard</a>
+  <a href="/order">Order</a>
+  <a href="/history">History</a>
   <a href="/transactions">Transaksi</a>
-  {% if user and user.role == 'admin' %} | <a href="/admin/users">Admin</a>{% endif %} |
+  {% if user and user.role == 'admin' %}
+  <a href="/admin/users">Admin Users</a>
+  <a href="/admin/products">Admin Produk</a>
+  <a href="/admin/history">Admin History</a>
+  {% endif %}
   <a href="/logout">Logout</a>
 </nav>
 <main>{% block content %}{% endblock %}</main>
