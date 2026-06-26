@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Kelola User</h1>
+<h2>Tambah User</h2>
+<form method="post" action="/admin/users">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input name="username" placeholder="Username" required>
+  <input name="password" type="password" placeholder="Password" required>
+  <select name="role"><option value="user">User</option><option value="admin">Admin</option></select>
+  <button type="submit">Tambah</button>
+</form>
+<h2>Daftar User</h2>
+<table border="1" cellpadding="6">
+  <tr><th>ID</th><th>Username</th><th>Role</th><th>Saldo</th><th>Status</th><th>Aksi</th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.id }}</td><td>{{ u.username }}</td><td>{{ u.role }}</td>
+    <td>Rp {{ "{:,.0f}".format(u.balance) }}</td>
+    <td>{{ 'Aktif' if u.is_active else 'Nonaktif' }}</td>
+    <td>
+      <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">{{ 'Nonaktifkan' if u.is_active else 'Aktifkan' }}</button>
+      </form>
+      <form method="post" action="/admin/users/{{ u.id }}/topup" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input name="amount" type="number" placeholder="Nominal" style="width:100px">
+        <button type="submit">Top-up</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
