@@ -10,7 +10,7 @@
     .then(d => {
       if (d.status === 'pending' || d.status === 'processing') {
         setTimeout(poll, 3000);
-      } else { location.reload(); }
+      } else { window.location.href = '/history'; }
     });
 })();
 </script>
