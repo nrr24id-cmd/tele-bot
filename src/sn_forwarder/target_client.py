@@ -50,11 +50,16 @@ class TelethonTargetClient:
             first = await conv.get_response()
             logger.info("[TC] Reply 1: %r", first.raw_text)
 
-            # Bot kirim "Placing order..." dulu, lalu hasil asli di pesan kedua
+            # Bot kirim 3 pesan: "Placing order..." → "Order placed..." → "Auto status..."
             if first.raw_text and first.raw_text.startswith("Placing order"):
                 second = await conv.get_response()
                 logger.info("[TC] Reply 2: %r", second.raw_text)
-                reply = second
+                if second.raw_text and second.raw_text.startswith("Order placed"):
+                    third = await conv.get_response()
+                    logger.info("[TC] Reply 3: %r", third.raw_text)
+                    reply = third
+                else:
+                    reply = second
             else:
                 reply = first
 
