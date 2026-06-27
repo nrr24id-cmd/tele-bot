@@ -6,8 +6,8 @@ Panel web multi-user untuk submit request ke bot Telegram via Telethon. Satu pro
 
 ### 1. Install dependensi
 
-```powershell
-.\.venv\Scripts\pip install -r requirements.txt
+```bash
+.venv/Scripts/pip install -r requirements.txt
 ```
 
 ### 2. Konfigurasi `.env`
@@ -27,28 +27,26 @@ DATABASE_PATH=sn_panel.db
 ```
 
 Generate `SESSION_SECRET`:
-```powershell
-.\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"
+```bash
+.venv/Scripts/python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 ### 3. Buat admin pertama
 
-```powershell
-$env:PYTHONPATH='src'
-.\.venv\Scripts\python -m sn_forwarder.setup_admin
+```bash
+PYTHONPATH=src .venv/Scripts/python -m sn_forwarder.setup_admin
 ```
 
 ### 4. Jalankan aplikasi
 
-```powershell
-$env:PYTHONPATH='src'
-.\.venv\Scripts\python -m sn_forwarder.main
+```bash
+PYTHONPATH=src .venv/Scripts/python -m sn_forwarder.main
 ```
 
 ### 5. Akses publik via Cloudflare Tunnel
 
 Di terminal terpisah:
-```powershell
+```bash
 cloudflared tunnel --url http://127.0.0.1:8000
 ```
 
@@ -64,7 +62,6 @@ URL HTTPS muncul di terminal Cloudflare (mis. `https://xxxx.trycloudflare.com`).
 
 ## Menjalankan tes
 
-```powershell
-$env:PYTHONPATH='src'
-.\.venv\Scripts\python -m pytest -q
+```bash
+PYTHONPATH=src .venv/Scripts/python -m pytest -q
 ```

@@ -1,0 +1,419 @@
+diff --git a/.superpowers/sdd/task-6-report.md b/.superpowers/sdd/task-6-report.md
+new file mode 100644
+index 0000000..b67c766
+--- /dev/null
++++ b/.superpowers/sdd/task-6-report.md
+@@ -0,0 +1,38 @@
++# Task 6 Report — FastAPI App + Session Auth
++
++## Status
++COMPLETE — 4/4 tests passed, full suite 27/27 passed.
++
++## Files Created
++- `src/sn_forwarder/web/__init__.py` — empty package init
++- `src/sn_forwarder/web/auth.py` — bcrypt password hashing, session helpers, CSRF, brute-force lockout, `require_user`/`require_admin`, `NotAuthenticatedException`
++- `src/sn_forwarder/web/app.py` — `build_web_app()` factory: SessionMiddleware, login/logout routes, exception handler for `NotAuthenticatedException` → 302 to `/login`
++- `src/sn_forwarder/web/routes_panel.py` — stub with `/dashboard` route (calls `require_user`)
++- `src/sn_forwarder/web/routes_admin.py` — stub with `/admin/users` route (calls `require_admin`)
++- `src/sn_forwarder/web/templates/login.html`
++- `src/sn_forwarder/web/templates/base.html`
++- `src/sn_forwarder/web/templates/dashboard.html`
++- `tests/test_web_auth.py`
++- `requirements.txt` — added `bcrypt==4.0.1` pin
++
++## Test Results
++```
++4 passed (test_web_auth.py)
++27 passed total (full suite)
++```
++
++## Deviations from Spec
++
++### 1. `require_user` raises `NotAuthenticatedException` instead of `RedirectResponse`
++The spec said to `raise RedirectResponse(...)` and add an `@app.exception_handler(RedirectResponse)` handler. This does not work: Starlette's `ExceptionMiddleware.add_exception_handler` asserts `issubclass(exc_class, Exception)`, and `RedirectResponse` is not an `Exception` subclass — registering it raises `AssertionError` at app startup.
++
++Fix: introduced `NotAuthenticatedException(Exception)` in `auth.py`. `require_user` raises this, and `app.py` registers `@app.exception_handler(NotAuthenticatedException)` which returns a `RedirectResponse(url="/login", status_code=302)`. Behavior is identical.
++
++### 2. `bcrypt==4.0.1` pinned in requirements.txt
++The venv had `bcrypt==5.0.0` installed. bcrypt 5.x raises `ValueError` when hashing passwords >72 bytes; passlib 1.7.4's backend detection probe uses a 255-byte password internally, triggering this error before any user-facing `hash()` call. Downgraded to `bcrypt==4.0.1` (last version passlib 1.7.4 is tested against) and pinned it in `requirements.txt`.
++
++### 3. Template deprecation warning
++Starlette recommends `TemplateResponse(request, name)` signature (request first) rather than `TemplateResponse(name, {"request": request})`. This produces one `DeprecationWarning` per affected response. Not a test failure; will be fixed when templates are fleshed out in Tasks 7–8.
++
++## Commit Hash
++(see git log after commit)
+diff --git a/requirements.txt b/requirements.txt
+index 965a72d..767c0f9 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -2,10 +2,11 @@ python-dotenv==1.0.1
+ Telethon==1.38.1
+ fastapi==0.115.5
+ uvicorn[standard]==0.32.1
+ jinja2==3.1.4
+ python-multipart==0.0.12
+ passlib[bcrypt]==1.7.4
++bcrypt==4.0.1
+ itsdangerous==2.2.0
+ pytest==8.3.4
+ pytest-asyncio==0.25.2
+ httpx==0.28.1
+diff --git a/src/sn_forwarder/web/__init__.py b/src/sn_forwarder/web/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/sn_forwarder/web/app.py b/src/sn_forwarder/web/app.py
+new file mode 100644
+index 0000000..820df4c
+--- /dev/null
++++ b/src/sn_forwarder/web/app.py
+@@ -0,0 +1,104 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from fastapi import FastAPI, Request
++from fastapi.responses import HTMLResponse, RedirectResponse, Response
++from fastapi.staticfiles import StaticFiles
++from fastapi.templating import Jinja2Templates
++from starlette.middleware.sessions import SessionMiddleware
++
++from ..balance import BalanceService
++from ..config import Settings
++from ..store import ProductStore, RequestStore, UserStore
++from .auth import (
++    NotAuthenticatedException,
++    get_csrf_token,
++    is_brute_forced,
++    login_user,
++    logout_user,
++    record_failed,
++    require_admin,
++    require_user,
++    verify_password,
++)
++
++TEMPLATES_DIR = Path(__file__).parent / "templates"
++STATIC_DIR = Path(__file__).parent / "static"
++
++
++def build_web_app(
++    settings: Settings,
++    user_store: UserStore,
++    product_store: ProductStore,
++    request_store: RequestStore,
++    balance_service: BalanceService,
++    worker,
++) -> FastAPI:
++    app = FastAPI(docs_url=None, redoc_url=None)
++    app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
++
++    templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
++    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
++    (TEMPLATES_DIR / "admin").mkdir(exist_ok=True)
++    STATIC_DIR.mkdir(parents=True, exist_ok=True)
++
++    if STATIC_DIR.exists() and any(STATIC_DIR.iterdir()):
++        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
++
++    app.state.user_store = user_store
++    app.state.product_store = product_store
++    app.state.request_store = request_store
++    app.state.balance_service = balance_service
++    app.state.worker = worker
++    app.state.templates = templates
++
++    from .routes_panel import router as panel_router
++    from .routes_admin import router as admin_router
++
++    app.include_router(panel_router)
++    app.include_router(admin_router, prefix="/admin")
++
++    @app.exception_handler(NotAuthenticatedException)
++    async def not_authenticated_handler(request: Request, exc: NotAuthenticatedException) -> Response:
++        return RedirectResponse(url="/login", status_code=302)
++
++    @app.get("/login", response_class=HTMLResponse)
++    async def login_page(request: Request):
++        csrf = get_csrf_token(request)
++        return templates.TemplateResponse("login.html", {"request": request, "csrf_token": csrf, "error": None})
++
++    @app.post("/login")
++    async def login_post(request: Request):
++        form = await request.form()
++        username = str(form.get("username", "")).strip()
++        password = str(form.get("password", ""))
++        ip = request.client.host if request.client else "unknown"
++
++        if is_brute_forced(ip):
++            csrf = get_csrf_token(request)
++            return templates.TemplateResponse(
++                "login.html",
++                {"request": request, "csrf_token": csrf, "error": "Terlalu banyak percobaan. Tunggu 5 menit."},
++                status_code=429,
++            )
++
++        user = user_store.get_by_username(username)
++        if user is None or not verify_password(password, user.password_hash) or not user.is_active:
++            record_failed(ip)
++            csrf = get_csrf_token(request)
++            return templates.TemplateResponse(
++                "login.html",
++                {"request": request, "csrf_token": csrf, "error": "Username atau password salah."},
++                status_code=200,
++            )
++
++        login_user(request, user.id)
++        return RedirectResponse(url="/dashboard", status_code=302)
++
++    @app.get("/logout")
++    async def logout(request: Request):
++        logout_user(request)
++        return RedirectResponse(url="/login", status_code=302)
++
++    return app
+diff --git a/src/sn_forwarder/web/auth.py b/src/sn_forwarder/web/auth.py
+new file mode 100644
+index 0000000..5e4abe0
+--- /dev/null
++++ b/src/sn_forwarder/web/auth.py
+@@ -0,0 +1,80 @@
++from __future__ import annotations
++
++import secrets
++import time
++from collections import defaultdict
++
++from fastapi import Request
++from fastapi.responses import RedirectResponse
++from passlib.context import CryptContext
++
++
++class NotAuthenticatedException(Exception):
++    """Raised when a route requires a logged-in user but none is found."""
++
++from ..store import UserRecord, UserStore
++
++_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
++_failed_attempts: dict[str, list[float]] = defaultdict(list)
++_LOCKOUT_SECONDS = 300
++_MAX_ATTEMPTS = 5
++
++
++def hash_password(plain: str) -> str:
++    return _pwd_ctx.hash(plain)
++
++
++def verify_password(plain: str, hashed: str) -> bool:
++    return _pwd_ctx.verify(plain, hashed)
++
++
++def get_csrf_token(request: Request) -> str:
++    if "csrf_token" not in request.session:
++        request.session["csrf_token"] = secrets.token_hex(32)
++    return request.session["csrf_token"]
++
++
++def verify_csrf(request: Request, form_token: str) -> bool:
++    expected = request.session.get("csrf_token", "")
++    return secrets.compare_digest(expected, form_token)
++
++
++def is_brute_forced(ip: str) -> bool:
++    now = time.time()
++    attempts = [t for t in _failed_attempts[ip] if now - t < _LOCKOUT_SECONDS]
++    _failed_attempts[ip] = attempts
++    return len(attempts) >= _MAX_ATTEMPTS
++
++
++def record_failed(ip: str) -> None:
++    _failed_attempts[ip].append(time.time())
++
++
++def login_user(request: Request, user_id: int) -> None:
++    request.session["user_id"] = user_id
++
++
++def logout_user(request: Request) -> None:
++    request.session.clear()
++
++
++def get_current_user(request: Request, user_store: UserStore) -> UserRecord | None:
++    user_id = request.session.get("user_id")
++    if user_id is None:
++        return None
++    return user_store.get_by_id(user_id)
++
++
++def require_user(request: Request, user_store: UserStore) -> UserRecord:
++    user = get_current_user(request, user_store)
++    if user is None or not user.is_active:
++        raise NotAuthenticatedException()
++    return user
++
++
++def require_admin(request: Request, user_store: UserStore) -> UserRecord:
++    user = require_user(request, user_store)
++    if user.role != "admin":
++        from fastapi import HTTPException
++        raise HTTPException(status_code=403, detail="Admin only")
++    return user
+diff --git a/src/sn_forwarder/web/routes_admin.py b/src/sn_forwarder/web/routes_admin.py
+new file mode 100644
+index 0000000..88dbff6
+--- /dev/null
++++ b/src/sn_forwarder/web/routes_admin.py
+@@ -0,0 +1,11 @@
++from fastapi import APIRouter, Request
++from fastapi.responses import HTMLResponse
++
++router = APIRouter()
++
++
++@router.get("/users", response_class=HTMLResponse)
++async def admin_users(request: Request):
++    from .auth import require_admin
++    user = require_admin(request, request.app.state.user_store)
++    return HTMLResponse(f"<p>Admin: {user.username}</p>")
+diff --git a/src/sn_forwarder/web/routes_panel.py b/src/sn_forwarder/web/routes_panel.py
+new file mode 100644
+index 0000000..6f9ab97
+--- /dev/null
++++ b/src/sn_forwarder/web/routes_panel.py
+@@ -0,0 +1,12 @@
++from fastapi import APIRouter, Request
++from fastapi.responses import HTMLResponse
++
++router = APIRouter()
++
++
++@router.get("/dashboard", response_class=HTMLResponse)
++async def dashboard(request: Request):
++    from .auth import require_user
++    user = require_user(request, request.app.state.user_store)
++    templates = request.app.state.templates
++    return templates.TemplateResponse("dashboard.html", {"request": request, "user": user})
+diff --git a/src/sn_forwarder/web/templates/base.html b/src/sn_forwarder/web/templates/base.html
+new file mode 100644
+index 0000000..0324cdc
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/base.html
+@@ -0,0 +1,15 @@
++<!DOCTYPE html>
++<html>
++<head><meta charset="utf-8"><title>SN Panel</title></head>
++<body>
++<nav>
++  <a href="/dashboard">Dashboard</a> |
++  <a href="/order">Order</a> |
++  <a href="/history">History</a> |
++  <a href="/transactions">Transaksi</a>
++  {% if user and user.role == 'admin' %} | <a href="/admin/users">Admin</a>{% endif %} |
++  <a href="/logout">Logout</a>
++</nav>
++<main>{% block content %}{% endblock %}</main>
++</body>
++</html>
+diff --git a/src/sn_forwarder/web/templates/dashboard.html b/src/sn_forwarder/web/templates/dashboard.html
+new file mode 100644
+index 0000000..13eead5
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/dashboard.html
+@@ -0,0 +1,7 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Dashboard</h1>
++<p>Selamat datang, <strong>{{ user.username }}</strong></p>
++<p>Saldo: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
++<a href="/order"><button>Order Baru</button></a>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/login.html b/src/sn_forwarder/web/templates/login.html
+new file mode 100644
+index 0000000..c6e1c7a
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/login.html
+@@ -0,0 +1,14 @@
++<!DOCTYPE html>
++<html>
++<head><meta charset="utf-8"><title>Login — SN Panel</title></head>
++<body>
++<h1>Login</h1>
++{% if error %}<p style="color:red">{{ error }}</p>{% endif %}
++<form method="post" action="/login">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++  <p><input name="username" placeholder="Username" required></p>
++  <p><input name="password" type="password" placeholder="Password" required></p>
++  <button type="submit">Login</button>
++</form>
++</body>
++</html>
+diff --git a/tests/test_web_auth.py b/tests/test_web_auth.py
+new file mode 100644
+index 0000000..149ac33
+--- /dev/null
++++ b/tests/test_web_auth.py
+@@ -0,0 +1,65 @@
++import pytest
++from httpx import ASGITransport, AsyncClient
++from sn_forwarder.balance import BalanceService
++from sn_forwarder.config import Settings
++from sn_forwarder.store import ProductStore, RequestStore, UserStore
++from sn_forwarder.web.app import build_web_app
++from sn_forwarder.web.auth import hash_password
++
++
++def make_settings():
++    return Settings(
++        api_id=1, api_hash="h", target_bot_username="@b",
++        reply_timeout_seconds=30.0, database_path=":memory:",
++        telethon_session_name="s", session_secret="testsecret1234567890",
++        web_host="127.0.0.1", web_port=8000,
++    )
++
++
++def make_app(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    settings = make_settings()
++    user_store = UserStore(db)
++    product_store = ProductStore(db)
++    request_store = RequestStore(db)
++    balance_service = BalanceService(db)
++    user_store.create_user("admin", hash_password("adminpass"), role="admin")
++    user_store.create_user("user1", hash_password("userpass"), role="user")
++    app = build_web_app(settings, user_store, product_store, request_store, balance_service, worker=None)
++    return app
++
++
++@pytest.mark.asyncio
++async def test_login_success(tmp_path):
++    app = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        r = await client.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
++    assert r.status_code == 302
++    assert r.headers["location"] == "/dashboard"
++
++
++@pytest.mark.asyncio
++async def test_login_wrong_password(tmp_path):
++    app = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        r = await client.post("/login", data={"username": "admin", "password": "wrong"}, follow_redirects=False)
++    assert r.status_code == 200
++    assert b"salah" in r.content.lower()
++
++
++@pytest.mark.asyncio
++async def test_dashboard_requires_login(tmp_path):
++    app = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        r = await client.get("/dashboard", follow_redirects=False)
++    assert r.status_code == 302
++    assert "/login" in r.headers["location"]
++
++
++@pytest.mark.asyncio
++async def test_admin_route_requires_admin(tmp_path):
++    app = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await client.post("/login", data={"username": "user1", "password": "userpass"})
++        r = await client.get("/admin/users", follow_redirects=False)
++    assert r.status_code == 403

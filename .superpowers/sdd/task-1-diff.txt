@@ -1,0 +1,276 @@
+diff --git a/.env.example b/.env.example
+index 89201bf..bb10955 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,10 +1,9 @@
+-BOT_TOKEN=123456:replace_me
+ API_ID=123456
+ API_HASH=replace_me
+-OWNER_USER_IDS=123456789
+ TARGET_BOT_USERNAME=@target_bot_username
+-TARGET_COMMAND_TEMPLATE=/register {sn}
+ REPLY_TIMEOUT_SECONDS=60
+ DATABASE_PATH=data/requests.sqlite3
+ TELETHON_SESSION_NAME=owner_session
+-
++SESSION_SECRET=ganti_dengan_string_acak_minimal_32_karakter
++WEB_HOST=127.0.0.1
++WEB_PORT=8000
+diff --git a/requirements.txt b/requirements.txt
+index 50279e6..965a72d 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,6 +1,11 @@
+ python-dotenv==1.0.1
+-python-telegram-bot==21.10
+ Telethon==1.38.1
++fastapi==0.115.5
++uvicorn[standard]==0.32.1
++jinja2==3.1.4
++python-multipart==0.0.12
++passlib[bcrypt]==1.7.4
++itsdangerous==2.2.0
+ pytest==8.3.4
+ pytest-asyncio==0.25.2
+-
++httpx==0.28.1
+diff --git a/src/sn_forwarder/bot_app.py b/src/sn_forwarder/bot_app.py
+deleted file mode 100644
+index 711ffd6..0000000
+--- a/src/sn_forwarder/bot_app.py
++++ /dev/null
+@@ -1,47 +0,0 @@
+-from __future__ import annotations
+-
+-from telegram import Update
+-from telegram.ext import Application, CommandHandler, ContextTypes
+-
+-from .config import Settings
+-from .worker import RegistrationJob, RegistrationWorker
+-
+-
+-def is_authorized(user_id: int | None, owner_user_ids: frozenset[int]) -> bool:
+-    return user_id in owner_user_ids if user_id is not None else False
+-
+-
+-def parse_reg_text(text: str) -> str | None:
+-    parts = text.strip().split(maxsplit=1)
+-    if len(parts) != 2 or not parts[1].strip():
+-        return None
+-    return parts[1].strip()
+-
+-
+-def build_application(settings: Settings, worker: RegistrationWorker) -> Application:
+-    app = Application.builder().token(settings.bot_token).build()
+-
+-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+-        if update.effective_chat is None:
+-            return
+-        await context.bot.send_message(update.effective_chat.id, "Bot register SN aktif.")
+-
+-    async def reg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+-        if update.effective_user is None or update.effective_chat is None or update.effective_message is None:
+-            return
+-        if not is_authorized(update.effective_user.id, settings.owner_user_ids):
+-            await context.bot.send_message(update.effective_chat.id, "Akses ditolak.")
+-            return
+-        sn = parse_reg_text(update.effective_message.text or "")
+-        if sn is None:
+-            await context.bot.send_message(update.effective_chat.id, "Format: /reg <SN>")
+-            return
+-        queue_size = await worker.enqueue(
+-            RegistrationJob(user_id=update.effective_user.id, chat_id=update.effective_chat.id, sn=sn)
+-        )
+-        await context.bot.send_message(update.effective_chat.id, f"Request diterima. Antrian: {queue_size}")
+-
+-    app.add_handler(CommandHandler("start", start))
+-    app.add_handler(CommandHandler("reg", reg))
+-    return app
+-
+diff --git a/src/sn_forwarder/config.py b/src/sn_forwarder/config.py
+index a0f4ff9..4feddcd 100644
+--- a/src/sn_forwarder/config.py
++++ b/src/sn_forwarder/config.py
+@@ -8,57 +8,52 @@ from dotenv import load_dotenv
+ 
+ 
+ class ConfigError(ValueError):
+     pass
+ 
+ 
+ @dataclass(frozen=True)
+ class Settings:
+-    bot_token: str
+     api_id: int
+     api_hash: str
+-    owner_user_ids: frozenset[int]
+     target_bot_username: str
+-    target_command_template: str
+     reply_timeout_seconds: float
+     database_path: str
+     telethon_session_name: str
+-
+-    def render_target_command(self, sn: str) -> str:
+-        return self.target_command_template.format(sn=sn)
++    session_secret: str
++    web_host: str
++    web_port: int
+ 
+ 
+ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
+     if env is None:
+         load_dotenv()
+         env = os.environ
+ 
+-    bot_token = _required(env, "BOT_TOKEN")
+     api_id = _parse_int(_required(env, "API_ID"), "API_ID")
+     api_hash = _required(env, "API_HASH")
+-    owner_user_ids = _parse_user_ids(_required(env, "OWNER_USER_IDS"))
+     target_bot_username = _required(env, "TARGET_BOT_USERNAME")
+-    target_command_template = env.get("TARGET_COMMAND_TEMPLATE", "/register {sn}").strip()
+-    if "{sn}" not in target_command_template:
+-        raise ConfigError("TARGET_COMMAND_TEMPLATE must include {sn}")
+     reply_timeout_seconds = _parse_float(env.get("REPLY_TIMEOUT_SECONDS", "60"), "REPLY_TIMEOUT_SECONDS")
+     database_path = env.get("DATABASE_PATH", "data/requests.sqlite3").strip()
+     telethon_session_name = env.get("TELETHON_SESSION_NAME", "owner_session").strip()
++    session_secret = _required(env, "SESSION_SECRET")
++    web_host = env.get("WEB_HOST", "127.0.0.1").strip()
++    web_port = _parse_int(env.get("WEB_PORT", "8000"), "WEB_PORT")
+ 
+     return Settings(
+-        bot_token=bot_token,
+         api_id=api_id,
+         api_hash=api_hash,
+-        owner_user_ids=owner_user_ids,
+         target_bot_username=target_bot_username,
+-        target_command_template=target_command_template,
+         reply_timeout_seconds=reply_timeout_seconds,
+         database_path=database_path,
+         telethon_session_name=telethon_session_name,
++        session_secret=session_secret,
++        web_host=web_host,
++        web_port=web_port,
+     )
+ 
+ 
+ def _required(env: Mapping[str, str], key: str) -> str:
+     value = env.get(key, "").strip()
+     if not value:
+         raise ConfigError(f"{key} is required")
+     return value
+@@ -74,20 +69,8 @@ def _parse_int(value: str, key: str) -> int:
+ def _parse_float(value: str, key: str) -> float:
+     try:
+         parsed = float(value)
+     except ValueError as exc:
+         raise ConfigError(f"{key} must be a number") from exc
+     if parsed <= 0:
+         raise ConfigError(f"{key} must be greater than zero")
+     return parsed
+-
+-
+-def _parse_user_ids(value: str) -> frozenset[int]:
+-    user_ids: set[int] = set()
+-    for raw_id in value.split(","):
+-        raw_id = raw_id.strip()
+-        if raw_id:
+-            user_ids.add(_parse_int(raw_id, "OWNER_USER_IDS"))
+-    if not user_ids:
+-        raise ConfigError("OWNER_USER_IDS must contain at least one Telegram user ID")
+-    return frozenset(user_ids)
+-
+diff --git a/tests/test_bot_app.py b/tests/test_bot_app.py
+deleted file mode 100644
+index 3c0adaf..0000000
+--- a/tests/test_bot_app.py
++++ /dev/null
+@@ -1,18 +0,0 @@
+-from sn_forwarder.bot_app import is_authorized, parse_reg_text
+-
+-
+-def test_is_authorized_allows_owner():
+-    assert is_authorized(111, frozenset({111, 222})) is True
+-
+-
+-def test_is_authorized_rejects_missing_user():
+-    assert is_authorized(None, frozenset({111, 222})) is False
+-
+-
+-def test_parse_reg_text_extracts_sn():
+-    assert parse_reg_text("/reg SN123") == "SN123"
+-
+-
+-def test_parse_reg_text_requires_sn():
+-    assert parse_reg_text("/reg") is None
+-
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 145ecdc..2a50f59 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -1,44 +1,47 @@
+ import pytest
+-
+ from sn_forwarder.config import ConfigError, load_settings
+ 
+ 
+ def valid_env():
+     return {
+-        "BOT_TOKEN": "123:abc",
+         "API_ID": "12345",
+         "API_HASH": "hash",
+-        "OWNER_USER_IDS": "111,222",
+         "TARGET_BOT_USERNAME": "@target_bot",
+-        "TARGET_COMMAND_TEMPLATE": "/register {sn}",
+         "REPLY_TIMEOUT_SECONDS": "60",
+         "DATABASE_PATH": "data/requests.sqlite3",
+         "TELETHON_SESSION_NAME": "owner_session",
++        "SESSION_SECRET": "supersecret",
++        "WEB_HOST": "127.0.0.1",
++        "WEB_PORT": "8000",
+     }
+ 
+ 
+ def test_load_settings_parses_values():
+-    settings = load_settings(valid_env())
+-
+-    assert settings.bot_token == "123:abc"
+-    assert settings.api_id == 12345
+-    assert settings.owner_user_ids == frozenset({111, 222})
+-    assert settings.target_bot_username == "@target_bot"
+-    assert settings.render_target_command("SN123") == "/register SN123"
++    s = load_settings(valid_env())
++    assert s.api_id == 12345
++    assert s.api_hash == "hash"
++    assert s.target_bot_username == "@target_bot"
++    assert s.session_secret == "supersecret"
++    assert s.web_host == "127.0.0.1"
++    assert s.web_port == 8000
+ 
+ 
+-def test_load_settings_rejects_missing_required_value():
++def test_load_settings_rejects_missing_api_id():
+     env = valid_env()
+-    env.pop("BOT_TOKEN")
+-
+-    with pytest.raises(ConfigError, match="BOT_TOKEN"):
++    env.pop("API_ID")
++    with pytest.raises(ConfigError, match="API_ID"):
+         load_settings(env)
+ 
+ 
+-def test_load_settings_rejects_template_without_sn_token():
++def test_load_settings_rejects_missing_session_secret():
+     env = valid_env()
+-    env["TARGET_COMMAND_TEMPLATE"] = "/register"
+-
+-    with pytest.raises(ConfigError, match="TARGET_COMMAND_TEMPLATE"):
++    env.pop("SESSION_SECRET")
++    with pytest.raises(ConfigError, match="SESSION_SECRET"):
+         load_settings(env)
+ 
++
++def test_load_settings_rejects_invalid_port():
++    env = valid_env()
++    env["WEB_PORT"] = "abc"
++    with pytest.raises(ConfigError, match="WEB_PORT"):
++        load_settings(env)

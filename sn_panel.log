@@ -1,0 +1,96 @@
+2026-06-27 07:00:04,514 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:00:04,517 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:00:06,608 __main__ INFO Telethon connected
+2026-06-27 07:00:06,618 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:01:03,009 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:01:03,011 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:01:04,980 __main__ INFO Telethon connected
+2026-06-27 07:01:05,027 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:03:10,954 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:03:11,254 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:03:11,254 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Pro Tool A12+'
+2026-06-27 07:04:46,802 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:04:46,804 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:04:48,806 __main__ INFO Telethon connected
+2026-06-27 07:04:48,817 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:05:00,701 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:05:01,159 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:05:01,159 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Pro Tool A12+'
+2026-06-27 07:05:02,975 sn_forwarder.target_client INFO [TC] Sent SN: 'C6KXMEMYKXKN'
+2026-06-27 07:05:03,340 sn_forwarder.target_client INFO [TC] Final reply: 'Invalid service. Choose from the menu or /cancel.'
+2026-06-27 07:06:00,663 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:06:00,666 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:07:21,821 telethon.network.connection.connection WARNING Server closed the connection: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:07:21,822 telethon.network.mtprotosender INFO Connection closed while receiving data: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:07:21,822 telethon.network.mtprotosender INFO Closing current connection to begin reconnect...
+2026-06-27 07:07:21,822 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:07:21,823 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:08:42,965 telethon.network.connection.connection WARNING Server closed the connection: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:08:42,965 telethon.network.mtprotosender INFO Connection closed while receiving data: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:08:42,965 telethon.network.mtprotosender INFO Closing current connection to begin reconnect...
+2026-06-27 07:08:42,965 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:08:42,967 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:08:43,675 telethon.network.mtprotostate WARNING Server resent the older message 7655860489710142465, ignoring
+2026-06-27 07:08:44,934 __main__ INFO Telethon connected
+2026-06-27 07:08:44,954 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:09:11,170 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:09:11,537 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:09:11,537 sn_forwarder.target_client INFO [TC] Available buttons: ["'Amrr Activator Pro Tool A12+ '", "'Amrr Activator Bypass MDM iPhone & iPads'", "'Amrr Unlocker A5 A6 V1.5'", "'Amrr Activator Pro Tool A9/A11 '", "'Amrr Activator T2 Bypass Macbook'"]
+2026-06-27 07:09:11,537 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Pro Tool A12+', result: None
+2026-06-27 07:09:13,381 sn_forwarder.target_client INFO [TC] Sent SN: 'C6KXMEMYKXKN'
+2026-06-27 07:09:13,694 sn_forwarder.target_client INFO [TC] Final reply: 'Invalid service. Choose from the menu or /cancel.'
+2026-06-27 07:12:59,733 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:12:59,735 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:13:01,721 __main__ INFO Telethon connected
+2026-06-27 07:13:01,765 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:13:22,053 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A12+ '
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Bypass MDM iPhone & iPads'
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Unlocker A5 A6 V1.5'
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A9/A11 '
+2026-06-27 07:13:22,943 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator T2 Bypass Macbook'
+2026-06-27 07:13:38,267 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Pro Tool A12+ '
+2026-06-27 07:13:40,085 sn_forwarder.target_client INFO [TC] Sent SN: 'FK3QLTXRGRYF'
+2026-06-27 07:13:40,463 sn_forwarder.target_client INFO [TC] Final reply: 'Placing order for: Amrr Activator Pro Tool A12+ ...'
+2026-06-27 07:18:56,276 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:18:56,278 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:18:58,315 __main__ INFO Telethon connected
+2026-06-27 07:18:58,325 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000
+2026-06-27 07:19:59,991 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:20:00,400 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:20:00,401 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A12+ '
+2026-06-27 07:20:00,401 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Bypass MDM iPhone & iPads'
+2026-06-27 07:20:00,401 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Unlocker A5 A6 V1.5'
+2026-06-27 07:20:00,401 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A9/A11 '
+2026-06-27 07:20:00,402 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator T2 Bypass Macbook'
+2026-06-27 07:20:15,731 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Pro Tool A12+ '
+2026-06-27 07:20:17,638 sn_forwarder.target_client INFO [TC] Sent SN: 'FK3QLTXRGQQQ'
+2026-06-27 07:20:17,902 sn_forwarder.target_client INFO [TC] Reply 1: 'Placing order for: Amrr Activator Pro Tool A12+ ...'
+2026-06-27 07:20:19,434 sn_forwarder.target_client INFO [TC] Reply 2: 'Order placed. API Order ID: 17888\nOrder received\nDownload: https://mega.nz/file/sFUXUCLB#73mt1SfMcjgHuh_KQF6TJa5EV6DxipqkFD265RiiQVw'
+2026-06-27 07:25:39,666 sn_forwarder.target_client INFO [TC] Sent /placeorder
+2026-06-27 07:25:39,984 sn_forwarder.target_client INFO [TC] Step1 response: 'Choose a service:'
+2026-06-27 07:25:39,984 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A12+ '
+2026-06-27 07:25:39,985 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Bypass MDM iPhone & iPads'
+2026-06-27 07:25:39,985 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Unlocker A5 A6 V1.5'
+2026-06-27 07:25:39,985 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator Pro Tool A9/A11 '
+2026-06-27 07:25:39,985 sn_forwarder.target_client INFO [TC] Found button: 'Amrr Activator T2 Bypass Macbook'
+2026-06-27 07:25:55,310 sn_forwarder.target_client INFO [TC] Clicked button: 'Amrr Activator Bypass MDM iPhone & iPads'
+2026-06-27 07:25:57,155 sn_forwarder.target_client INFO [TC] Sent SN: 'FK3QLTXRGSDA'
+2026-06-27 07:25:57,424 sn_forwarder.target_client INFO [TC] Reply 1: 'Placing order for: Amrr Activator Bypass MDM iPhone & iPads...'
+2026-06-27 07:26:01,004 sn_forwarder.target_client INFO [TC] Reply 2: 'Order placed. API Order ID: 17889\nOrder received\nDownload: https://mega.nz/file/4A8Vjb5I#4rIHCr_lSe9Tp2di6ire8sN563HOkI2xpQEbFo8vdfg'
+2026-06-27 07:36:51,010 telethon.network.connection.connection WARNING Server closed the connection: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:36:51,011 telethon.network.mtprotosender INFO Connection closed while receiving data: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:36:51,012 telethon.network.mtprotosender INFO Closing current connection to begin reconnect...
+2026-06-27 07:36:51,014 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:36:51,018 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:56:25,980 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:56:25,982 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:57:47,242 telethon.network.connection.connection WARNING Server closed the connection: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:57:47,243 telethon.network.mtprotosender INFO Connection closed while receiving data: 0 bytes read on a total of 8 expected bytes
+2026-06-27 07:57:47,245 telethon.network.mtprotosender INFO Closing current connection to begin reconnect...
+2026-06-27 07:57:47,246 telethon.network.mtprotosender INFO Connecting to 149.154.175.53:443/TcpFull...
+2026-06-27 07:57:47,250 telethon.network.mtprotosender INFO Connection to 149.154.175.53:443/TcpFull complete!
+2026-06-27 07:57:47,948 telethon.network.mtprotostate WARNING Server resent the older message 7655873135456675841, ignoring
+2026-06-27 07:57:49,197 __main__ INFO Telethon connected
+2026-06-27 07:57:49,209 __main__ INFO Starting SN Forwarder Platform on http://127.0.0.1:8000

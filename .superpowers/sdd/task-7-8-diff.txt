@@ -1,0 +1,603 @@
+diff --git a/src/sn_forwarder/web/routes_admin.py b/src/sn_forwarder/web/routes_admin.py
+index 88dbff6..31b3209 100644
+--- a/src/sn_forwarder/web/routes_admin.py
++++ b/src/sn_forwarder/web/routes_admin.py
+@@ -1,11 +1,94 @@
++from __future__ import annotations
++
+ from fastapi import APIRouter, Request
+-from fastapi.responses import HTMLResponse
++from fastapi.responses import HTMLResponse, RedirectResponse
++
++from .auth import get_csrf_token, hash_password, require_admin
+ 
+ router = APIRouter()
+ 
+ 
+ @router.get("/users", response_class=HTMLResponse)
+ async def admin_users(request: Request):
+-    from .auth import require_admin
+-    user = require_admin(request, request.app.state.user_store)
+-    return HTMLResponse(f"<p>Admin: {user.username}</p>")
++    require_admin(request, request.app.state.user_store)
++    users = request.app.state.user_store.list_all()
++    csrf = get_csrf_token(request)
++    return request.app.state.templates.TemplateResponse(
++        "admin/users.html", {"request": request, "users": users, "csrf_token": csrf}
++    )
++
++
++@router.post("/users")
++async def admin_create_user(request: Request):
++    require_admin(request, request.app.state.user_store)
++    form = await request.form()
++    username = str(form.get("username", "")).strip()
++    password = str(form.get("password", "")).strip()
++    role = str(form.get("role", "user")).strip()
++    if username and password:
++        request.app.state.user_store.create_user(username, hash_password(password), role=role)
++    return RedirectResponse(url="/admin/users", status_code=302)
++
++
++@router.post("/users/{user_id}/toggle")
++async def admin_toggle_user(user_id: int, request: Request):
++    require_admin(request, request.app.state.user_store)
++    user = request.app.state.user_store.get_by_id(user_id)
++    if user:
++        request.app.state.user_store.set_active(user_id, 0 if user.is_active else 1)
++    return RedirectResponse(url="/admin/users", status_code=302)
++
++
++@router.post("/users/{user_id}/topup")
++async def admin_topup(user_id: int, request: Request):
++    require_admin(request, request.app.state.user_store)
++    form = await request.form()
++    amount = int(form.get("amount", 0))
++    if amount > 0:
++        request.app.state.balance_service.topup(user_id, amount, note="topup admin")
++    return RedirectResponse(url="/admin/users", status_code=302)
++
++
++@router.get("/products", response_class=HTMLResponse)
++async def admin_products(request: Request):
++    require_admin(request, request.app.state.user_store)
++    products = request.app.state.product_store.list_all()
++    csrf = get_csrf_token(request)
++    return request.app.state.templates.TemplateResponse(
++        "admin/products.html", {"request": request, "products": products, "csrf_token": csrf}
++    )
++
++
++@router.post("/products")
++async def admin_create_product(request: Request):
++    require_admin(request, request.app.state.user_store)
++    form = await request.form()
++    name = str(form.get("name", "")).strip()
++    button_label = str(form.get("button_label", "")).strip()
++    price = int(form.get("price", 0))
++    sort_order = int(form.get("sort_order", 0))
++    if name and button_label and price > 0:
++        request.app.state.product_store.create_product(name, button_label, price, sort_order)
++    return RedirectResponse(url="/admin/products", status_code=302)
++
++
++@router.post("/products/{product_id}")
++async def admin_update_product(product_id: int, request: Request):
++    require_admin(request, request.app.state.user_store)
++    form = await request.form()
++    name = str(form.get("name", "")).strip()
++    button_label = str(form.get("button_label", "")).strip()
++    price = int(form.get("price", 0))
++    is_active = int(form.get("is_active", 1))
++    sort_order = int(form.get("sort_order", 0))
++    request.app.state.product_store.update(product_id, name, button_label, price, is_active, sort_order)
++    return RedirectResponse(url="/admin/products", status_code=302)
++
++
++@router.get("/history", response_class=HTMLResponse)
++async def admin_history(request: Request):
++    require_admin(request, request.app.state.user_store)
++    rows = request.app.state.request_store.get_all(limit=100)
++    return request.app.state.templates.TemplateResponse(
++        "admin/history.html", {"request": request, "rows": rows}
++    )
+diff --git a/src/sn_forwarder/web/routes_panel.py b/src/sn_forwarder/web/routes_panel.py
+index 6f9ab97..b9bb3dd 100644
+--- a/src/sn_forwarder/web/routes_panel.py
++++ b/src/sn_forwarder/web/routes_panel.py
+@@ -1,12 +1,112 @@
++from __future__ import annotations
++
+ from fastapi import APIRouter, Request
+-from fastapi.responses import HTMLResponse
++from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
++
++from ..worker import RegistrationJob
++from .auth import get_csrf_token, require_user, verify_csrf
+ 
+ router = APIRouter()
+ 
+ 
+ @router.get("/dashboard", response_class=HTMLResponse)
+ async def dashboard(request: Request):
+-    from .auth import require_user
+     user = require_user(request, request.app.state.user_store)
+-    templates = request.app.state.templates
+-    return templates.TemplateResponse("dashboard.html", {"request": request, "user": user})
++    fresh = request.app.state.user_store.get_by_id(user.id)
++    return request.app.state.templates.TemplateResponse(
++        "dashboard.html", {"request": request, "user": fresh}
++    )
++
++
++@router.get("/order", response_class=HTMLResponse)
++async def order_page(request: Request):
++    user = require_user(request, request.app.state.user_store)
++    products = request.app.state.product_store.list_active()
++    csrf = get_csrf_token(request)
++    return request.app.state.templates.TemplateResponse(
++        "order.html",
++        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": None},
++    )
++
++
++@router.post("/order")
++async def order_post(request: Request):
++    user = require_user(request, request.app.state.user_store)
++    form = await request.form()
++    csrf = str(form.get("csrf_token", ""))
++    if not verify_csrf(request, csrf):
++        return RedirectResponse(url="/login", status_code=302)
++
++    product_id_raw = form.get("product_id", "")
++    sn = str(form.get("sn", "")).strip()
++
++    try:
++        product_id = int(product_id_raw)
++    except (ValueError, TypeError):
++        return _order_error(request, user, "Produk tidak valid.")
++
++    product = request.app.state.product_store.get_by_id(product_id)
++    if not product or not product.is_active:
++        return _order_error(request, user, "Produk tidak valid.")
++
++    if not sn:
++        return _order_error(request, user, "SN tidak boleh kosong.")
++
++    request_id = request.app.state.request_store.create_order(
++        user.id, product.id, sn, product.price
++    )
++    if request_id is None:
++        return _order_error(request, user, "Saldo tidak cukup. Hubungi admin untuk top-up.")
++
++    job = RegistrationJob(
++        request_id=request_id,
++        user_id=user.id,
++        product_id=product.id,
++        sn=sn,
++        button_label=product.button_label,
++        price_charged=product.price,
++    )
++    await request.app.state.worker.enqueue(job)
++    return RedirectResponse(url=f"/history?submitted={request_id}", status_code=302)
++
++
++@router.get("/history", response_class=HTMLResponse)
++async def history(request: Request):
++    user = require_user(request, request.app.state.user_store)
++    rows = request.app.state.request_store.get_by_user(user.id, limit=50)
++    submitted = request.query_params.get("submitted")
++    return request.app.state.templates.TemplateResponse(
++        "history.html", {"request": request, "user": user, "rows": rows, "submitted": submitted}
++    )
++
++
++@router.get("/transactions", response_class=HTMLResponse)
++async def transactions(request: Request):
++    user = require_user(request, request.app.state.user_store)
++    fresh = request.app.state.user_store.get_by_id(user.id)
++    txns = request.app.state.balance_service.get_transactions(user.id)
++    return request.app.state.templates.TemplateResponse(
++        "transactions.html", {"request": request, "user": fresh, "txns": txns}
++    )
++
++
++@router.get("/api/request/{request_id}/status")
++async def request_status(request_id: int, request: Request):
++    user = require_user(request, request.app.state.user_store)
++    try:
++        record = request.app.state.request_store.get_request(request_id)
++    except KeyError:
++        return JSONResponse({"error": "not found"}, status_code=404)
++    if record.user_id != user.id and user.role != "admin":
++        return JSONResponse({"error": "forbidden"}, status_code=403)
++    return JSONResponse({"status": record.status, "reply_text": record.reply_text, "error_text": record.error_text})
++
++
++def _order_error(request: Request, user, message: str):
++    products = request.app.state.product_store.list_active()
++    csrf = get_csrf_token(request)
++    return request.app.state.templates.TemplateResponse(
++        "order.html",
++        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": message},
++        status_code=200,
++    )
+diff --git a/src/sn_forwarder/web/templates/admin/history.html b/src/sn_forwarder/web/templates/admin/history.html
+new file mode 100644
+index 0000000..b6206e5
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/admin/history.html
+@@ -0,0 +1,14 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>History Semua Request</h1>
++<table border="1" cellpadding="6">
++  <tr><th>#</th><th>User ID</th><th>Produk</th><th>SN</th><th>Status</th><th>Reply</th><th>Harga</th><th>Waktu</th></tr>
++  {% for r in rows %}
++  <tr>
++    <td>{{ r.id }}</td><td>{{ r.user_id }}</td><td>{{ r.product_name }}</td><td>{{ r.sn }}</td>
++    <td>{{ r.status }}</td><td>{{ r.reply_text or r.error_text or '-' }}</td>
++    <td>Rp {{ "{:,.0f}".format(r.price_charged) }}</td><td>{{ r.created_at }}</td>
++  </tr>
++  {% endfor %}
++</table>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/admin/products.html b/src/sn_forwarder/web/templates/admin/products.html
+new file mode 100644
+index 0000000..59cc2f4
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/admin/products.html
+@@ -0,0 +1,38 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Kelola Produk</h1>
++<h2>Tambah Produk</h2>
++<form method="post" action="/admin/products">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++  <input name="name" placeholder="Nama produk" required>
++  <input name="button_label" placeholder="Teks tombol PERSIS di bot tujuan" required style="width:300px">
++  <input name="price" type="number" placeholder="Harga (Rp)" required>
++  <input name="sort_order" type="number" placeholder="Urutan" value="0">
++  <button type="submit">Tambah</button>
++</form>
++<h2>Daftar Produk</h2>
++<table border="1" cellpadding="6">
++  <tr><th>ID</th><th>Nama</th><th>Button Label</th><th>Harga</th><th>Aktif</th><th>Edit</th></tr>
++  {% for p in products %}
++  <tr>
++    <td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.button_label }}</td>
++    <td>Rp {{ "{:,.0f}".format(p.price) }}</td>
++    <td>{{ 'Ya' if p.is_active else 'Tidak' }}</td>
++    <td>
++      <form method="post" action="/admin/products/{{ p.id }}">
++        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++        <input name="name" value="{{ p.name }}" style="width:100px">
++        <input name="button_label" value="{{ p.button_label }}" style="width:200px">
++        <input name="price" type="number" value="{{ p.price }}" style="width:80px">
++        <select name="is_active">
++          <option value="1" {% if p.is_active %}selected{% endif %}>Aktif</option>
++          <option value="0" {% if not p.is_active %}selected{% endif %}>Nonaktif</option>
++        </select>
++        <input name="sort_order" type="number" value="{{ p.sort_order }}" style="width:50px">
++        <button type="submit">Simpan</button>
++      </form>
++    </td>
++  </tr>
++  {% endfor %}
++</table>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/admin/users.html b/src/sn_forwarder/web/templates/admin/users.html
+new file mode 100644
+index 0000000..f26bdf7
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/admin/users.html
+@@ -0,0 +1,34 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Kelola User</h1>
++<h2>Tambah User</h2>
++<form method="post" action="/admin/users">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++  <input name="username" placeholder="Username" required>
++  <input name="password" type="password" placeholder="Password" required>
++  <select name="role"><option value="user">User</option><option value="admin">Admin</option></select>
++  <button type="submit">Tambah</button>
++</form>
++<h2>Daftar User</h2>
++<table border="1" cellpadding="6">
++  <tr><th>ID</th><th>Username</th><th>Role</th><th>Saldo</th><th>Status</th><th>Aksi</th></tr>
++  {% for u in users %}
++  <tr>
++    <td>{{ u.id }}</td><td>{{ u.username }}</td><td>{{ u.role }}</td>
++    <td>Rp {{ "{:,.0f}".format(u.balance) }}</td>
++    <td>{{ 'Aktif' if u.is_active else 'Nonaktif' }}</td>
++    <td>
++      <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline">
++        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++        <button type="submit">{{ 'Nonaktifkan' if u.is_active else 'Aktifkan' }}</button>
++      </form>
++      <form method="post" action="/admin/users/{{ u.id }}/topup" style="display:inline">
++        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++        <input name="amount" type="number" placeholder="Nominal" style="width:100px">
++        <button type="submit">Top-up</button>
++      </form>
++    </td>
++  </tr>
++  {% endfor %}
++</table>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/history.html b/src/sn_forwarder/web/templates/history.html
+new file mode 100644
+index 0000000..12fa23c
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/history.html
+@@ -0,0 +1,28 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>History</h1>
++{% if submitted %}
++<p>Request #{{ submitted }} dikirim. Status akan update otomatis.</p>
++<script>
++(function poll() {
++  fetch('/api/request/{{ submitted }}/status')
++    .then(r => r.json())
++    .then(d => {
++      if (d.status === 'pending' || d.status === 'processing') {
++        setTimeout(poll, 3000);
++      } else { location.reload(); }
++    });
++})();
++</script>
++{% endif %}
++<table border="1" cellpadding="6">
++  <tr><th>#</th><th>Produk</th><th>SN</th><th>Status</th><th>Reply</th><th>Harga</th><th>Waktu</th></tr>
++  {% for r in rows %}
++  <tr>
++    <td>{{ r.id }}</td><td>{{ r.product_name }}</td><td>{{ r.sn }}</td>
++    <td>{{ r.status }}</td><td>{{ r.reply_text or r.error_text or '-' }}</td>
++    <td>Rp {{ "{:,.0f}".format(r.price_charged) }}</td><td>{{ r.created_at }}</td>
++  </tr>
++  {% endfor %}
++</table>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/order.html b/src/sn_forwarder/web/templates/order.html
+new file mode 100644
+index 0000000..8462f4d
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/order.html
+@@ -0,0 +1,19 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Order Baru</h1>
++{% if error %}<p style="color:red">{{ error }}</p>{% endif %}
++<form method="post" action="/order">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
++  <p>
++    <label>Produk:
++      <select name="product_id">
++        {% for p in products %}
++        <option value="{{ p.id }}">{{ p.name }} — Rp {{ "{:,.0f}".format(p.price) }}</option>
++        {% endfor %}
++      </select>
++    </label>
++  </p>
++  <p><label>Serial Number: <input name="sn" required></label></p>
++  <button type="submit">Submit</button>
++</form>
++{% endblock %}
+diff --git a/src/sn_forwarder/web/templates/transactions.html b/src/sn_forwarder/web/templates/transactions.html
+new file mode 100644
+index 0000000..b0e1793
+--- /dev/null
++++ b/src/sn_forwarder/web/templates/transactions.html
+@@ -0,0 +1,16 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Riwayat Transaksi</h1>
++<p>Saldo saat ini: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
++<table border="1" cellpadding="6">
++  <tr><th>#</th><th>Tipe</th><th>Jumlah</th><th>Saldo Setelah</th><th>Ref</th><th>Waktu</th></tr>
++  {% for t in txns %}
++  <tr>
++    <td>{{ t.id }}</td><td>{{ t.type }}</td>
++    <td>Rp {{ "{:,.0f}".format(t.amount) }}</td>
++    <td>Rp {{ "{:,.0f}".format(t.balance_after) }}</td>
++    <td>{{ t.ref_request_id or '-' }}</td><td>{{ t.created_at }}</td>
++  </tr>
++  {% endfor %}
++</table>
++{% endblock %}
+diff --git a/tests/test_web_admin.py b/tests/test_web_admin.py
+new file mode 100644
+index 0000000..5d81bf8
+--- /dev/null
++++ b/tests/test_web_admin.py
+@@ -0,0 +1,75 @@
++import pytest
++from httpx import ASGITransport, AsyncClient
++from sn_forwarder.balance import BalanceService
++from sn_forwarder.config import Settings
++from sn_forwarder.store import ProductStore, RequestStore, UserStore
++from sn_forwarder.web.app import build_web_app
++from sn_forwarder.web.auth import hash_password
++
++
++def make_settings():
++    return Settings(
++        api_id=1, api_hash="h", target_bot_username="@b",
++        reply_timeout_seconds=30.0, database_path=":memory:",
++        telethon_session_name="s", session_secret="testsecret1234567890",
++        web_host="127.0.0.1", web_port=8000,
++    )
++
++
++def make_app(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    settings = make_settings()
++    user_store = UserStore(db)
++    product_store = ProductStore(db)
++    request_store = RequestStore(db)
++    balance_service = BalanceService(db)
++    user_store.create_user("admin", hash_password("adminpass"), role="admin")
++    user_store.create_user("user1", hash_password("upass"), role="user")
++    app = build_web_app(settings, user_store, product_store, request_store, balance_service, worker=None)
++    return app, user_store, product_store, balance_service
++
++
++async def admin_login(client):
++    await client.post("/login", data={"username": "admin", "password": "adminpass"})
++
++
++@pytest.mark.asyncio
++async def test_admin_can_create_product(tmp_path):
++    app, *_ = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await admin_login(client)
++        r = await client.post("/admin/products", data={
++            "name": "A12+", "button_label": "Amrr Activator Pro Tool A12+",
++            "price": "50000", "sort_order": "0",
++        }, follow_redirects=False)
++    assert r.status_code == 302
++
++
++@pytest.mark.asyncio
++async def test_admin_topup_increases_balance(tmp_path):
++    app, user_store, *_ = make_app(tmp_path)
++    uid = user_store.get_by_username("user1").id
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await admin_login(client)
++        r = await client.post(f"/admin/users/{uid}/topup", data={"amount": "100000"}, follow_redirects=False)
++    assert r.status_code == 302
++    assert user_store.get_by_id(uid).balance == 100000
++
++
++@pytest.mark.asyncio
++async def test_admin_toggle_user(tmp_path):
++    app, user_store, *_ = make_app(tmp_path)
++    uid = user_store.get_by_username("user1").id
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await admin_login(client)
++        await client.post(f"/admin/users/{uid}/toggle", follow_redirects=False)
++    assert user_store.get_by_id(uid).is_active == 0
++
++
++@pytest.mark.asyncio
++async def test_non_admin_cannot_access_admin(tmp_path):
++    app, *_ = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await client.post("/login", data={"username": "user1", "password": "upass"})
++        r = await client.get("/admin/users")
++    assert r.status_code == 403
+diff --git a/tests/test_web_panel.py b/tests/test_web_panel.py
+new file mode 100644
+index 0000000..ca8f25f
+--- /dev/null
++++ b/tests/test_web_panel.py
+@@ -0,0 +1,107 @@
++import re
++import pytest
++from httpx import ASGITransport, AsyncClient
++from sn_forwarder.balance import BalanceService
++from sn_forwarder.config import Settings
++from sn_forwarder.store import ProductStore, RequestStore, UserStore
++from sn_forwarder.web.app import build_web_app
++from sn_forwarder.web.auth import hash_password
++
++
++def make_settings():
++    return Settings(
++        api_id=1, api_hash="h", target_bot_username="@b",
++        reply_timeout_seconds=30.0, database_path=":memory:",
++        telethon_session_name="s", session_secret="testsecret1234567890",
++        web_host="127.0.0.1", web_port=8000,
++    )
++
++
++class FakeWorker:
++    def __init__(self):
++        self.jobs = []
++
++    async def enqueue(self, job):
++        self.jobs.append(job)
++        return len(self.jobs)
++
++
++def make_app(tmp_path, balance=100000):
++    db = str(tmp_path / "db.sqlite3")
++    settings = make_settings()
++    user_store = UserStore(db)
++    product_store = ProductStore(db)
++    request_store = RequestStore(db)
++    balance_service = BalanceService(db)
++    worker = FakeWorker()
++    uid = user_store.create_user("alice", hash_password("pass"), role="user")
++    user_store._add_balance(uid, balance)
++    product_store.create_product("A12+", "Amrr Activator Pro Tool A12+", 50000)
++    app = build_web_app(settings, user_store, product_store, request_store, balance_service, worker)
++    return app, worker, user_store, request_store, product_store
++
++
++async def login(client):
++    await client.post("/login", data={"username": "alice", "password": "pass"})
++
++
++@pytest.mark.asyncio
++async def test_dashboard_shows_balance(tmp_path):
++    app, *_ = make_app(tmp_path, balance=75000)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await login(client)
++        r = await client.get("/dashboard")
++    assert r.status_code == 200
++    assert b"75" in r.content
++
++
++@pytest.mark.asyncio
++async def test_order_post_success(tmp_path):
++    app, worker, user_store, request_store, product_store = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await login(client)
++        r = await client.get("/order")
++        pid_match = re.search(rb'name="product_id"[^>]*value="(\d+)"|value="(\d+)"[^>]*name="product_id"', r.content)
++        csrf_match = re.search(rb'name="csrf_token" value="([^"]+)"', r.content)
++        pid = (pid_match.group(1) or pid_match.group(2)).decode() if pid_match else "1"
++        csrf = csrf_match.group(1).decode() if csrf_match else ""
++        r2 = await client.post("/order", data={"product_id": pid, "sn": "SN999", "csrf_token": csrf}, follow_redirects=False)
++    assert r2.status_code == 302
++    assert len(worker.jobs) == 1
++    assert worker.jobs[0].sn == "SN999"
++
++
++@pytest.mark.asyncio
++async def test_order_post_insufficient_balance(tmp_path):
++    app, worker, *_ = make_app(tmp_path, balance=0)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await login(client)
++        r = await client.get("/order")
++        csrf_match = re.search(rb'name="csrf_token" value="([^"]+)"', r.content)
++        csrf = csrf_match.group(1).decode() if csrf_match else ""
++        r2 = await client.post("/order", data={"product_id": "1", "sn": "SN999", "csrf_token": csrf})
++    assert len(worker.jobs) == 0
++    assert b"saldo" in r2.content.lower()
++
++
++@pytest.mark.asyncio
++async def test_history_page(tmp_path):
++    app, *_ = make_app(tmp_path)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await login(client)
++        r = await client.get("/history")
++    assert r.status_code == 200
++
++
++@pytest.mark.asyncio
++async def test_status_api(tmp_path):
++    app, worker, user_store, request_store, product_store = make_app(tmp_path)
++    db = str(tmp_path / "db.sqlite3")
++    pid = product_store.list_active()[0].id
++    uid = user_store.list_all()[0].id
++    rid = request_store.create_order(uid, pid, "SN1", 50000)
++    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
++        await login(client)
++        r = await client.get(f"/api/request/{rid}/status")
++    assert r.status_code == 200
++    assert r.json()["status"] == "pending"

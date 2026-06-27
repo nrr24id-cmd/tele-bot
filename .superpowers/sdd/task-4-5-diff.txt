@@ -1,0 +1,340 @@
+diff --git a/src/sn_forwarder/target_client.py b/src/sn_forwarder/target_client.py
+index 5231203..6f6e9d0 100644
+--- a/src/sn_forwarder/target_client.py
++++ b/src/sn_forwarder/target_client.py
+@@ -1,24 +1,26 @@
+ from __future__ import annotations
+ 
+ from typing import Protocol
+ 
+ from telethon import TelegramClient
+ 
+ 
+ class TargetClientProtocol(Protocol):
+-    async def send_and_wait(self, command: str, timeout_seconds: float) -> str:
++    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
+         ...
+ 
+ 
+ class TelethonTargetClient:
+     def __init__(self, client: TelegramClient, target_bot_username: str) -> None:
+         self.client = client
+         self.target_bot_username = target_bot_username
+ 
+-    async def send_and_wait(self, command: str, timeout_seconds: float) -> str:
++    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
+         target = await self.client.get_entity(self.target_bot_username)
+-        async with self.client.conversation(target, timeout=timeout_seconds) as conversation:
+-            await conversation.send_message(command)
+-            response = await conversation.get_response()
+-        return response.raw_text or ""
+-
++        async with self.client.conversation(target, timeout=timeout_seconds) as conv:
++            await conv.send_message("/placeorder")
++            button_msg = await conv.get_response()
++            await button_msg.click(text=button_label)
++            await conv.send_message(sn)
++            reply = await conv.get_response()
++        return reply.raw_text or ""
+diff --git a/src/sn_forwarder/worker.py b/src/sn_forwarder/worker.py
+index a3f9b73..a5d946e 100644
+--- a/src/sn_forwarder/worker.py
++++ b/src/sn_forwarder/worker.py
+@@ -1,83 +1,71 @@
+ from __future__ import annotations
+ 
+ import asyncio
+ import logging
+ from dataclasses import dataclass
+ from typing import Protocol
+ 
++from .balance import BalanceService
+ from .store import RequestStore
+-from .target_client import TargetClientProtocol
+ 
+ logger = logging.getLogger(__name__)
+ 
+ 
+-class SettingsProtocol(Protocol):
+-    reply_timeout_seconds: float
+-
+-    def render_target_command(self, sn: str) -> str:
+-        ...
+-
+-
+-class OutboundBotProtocol(Protocol):
+-    async def send_message(self, chat_id: int, text: str) -> object:
++class TargetClientProtocol(Protocol):
++    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
+         ...
+ 
+ 
+ @dataclass(frozen=True)
+ class RegistrationJob:
++    request_id: int
+     user_id: int
+-    chat_id: int
++    product_id: int
+     sn: str
++    button_label: str
++    price_charged: int
+ 
+ 
+ class RegistrationWorker:
+     def __init__(
+         self,
+-        settings: SettingsProtocol,
+         store: RequestStore,
++        balance: BalanceService,
+         target_client: TargetClientProtocol,
+-        bot: OutboundBotProtocol | None,
++        reply_timeout_seconds: float,
+     ) -> None:
+-        self.settings = settings
+         self.store = store
++        self.balance = balance
+         self.target_client = target_client
+-        self.bot = bot
++        self.reply_timeout_seconds = reply_timeout_seconds
+         self.queue: asyncio.Queue[RegistrationJob] = asyncio.Queue()
+ 
+     async def enqueue(self, job: RegistrationJob) -> int:
+         await self.queue.put(job)
+         return self.queue.qsize()
+ 
+     async def run_forever(self) -> None:
+         while True:
+             job = await self.queue.get()
+             try:
+                 await self.process_one(job)
++            except Exception:
++                logger.exception("Unexpected error processing job %s", job.request_id)
+             finally:
+                 self.queue.task_done()
+ 
+-    async def process_one(self, job: RegistrationJob) -> int:
+-        command = self.settings.render_target_command(job.sn)
+-        request_id = self.store.create_request(job.user_id, job.chat_id, job.sn, command)
+-        self.store.mark_sent(request_id)
+-
++    async def process_one(self, job: RegistrationJob) -> None:
++        self.store.mark_sent(job.request_id)
+         try:
+-            reply = await self.target_client.send_and_wait(command, self.settings.reply_timeout_seconds)
++            reply = await self.target_client.send_and_wait(
++                job.button_label, job.sn, self.reply_timeout_seconds
++            )
+         except asyncio.TimeoutError:
+-            self.store.mark_failed(request_id, "timeout")
+-            await self._send(job.chat_id, "Timeout: bot tujuan tidak membalas.")
++            self.store.mark_failed(job.request_id, "timeout")
++            self.balance.refund(job.user_id, job.price_charged, job.request_id)
+         except Exception as exc:
+-            logger.exception("Registration request %s failed", request_id)
+-            self.store.mark_failed(request_id, str(exc))
+-            await self._send(job.chat_id, "Gagal memproses request. Cek log aplikasi.")
++            logger.exception("Registration request %s failed", job.request_id)
++            self.store.mark_failed(job.request_id, str(exc))
++            self.balance.refund(job.user_id, job.price_charged, job.request_id)
+         else:
+-            self.store.mark_success(request_id, reply)
+-            await self._send(job.chat_id, reply or "Bot tujuan membalas tanpa teks.")
+-
+-        return request_id
+-
+-    async def _send(self, chat_id: int, text: str) -> None:
+-        if self.bot is None:
+-            raise RuntimeError("Outbound bot is not configured")
+-        await self.bot.send_message(chat_id, text)
+-
++            self.store.mark_success(job.request_id, reply or "Bot tujuan membalas tanpa teks.")
+diff --git a/tests/test_target_client.py b/tests/test_target_client.py
+new file mode 100644
+index 0000000..ce8dec7
+--- /dev/null
++++ b/tests/test_target_client.py
+@@ -0,0 +1,63 @@
++import asyncio
++import pytest
++from unittest.mock import AsyncMock, MagicMock
++from sn_forwarder.target_client import TelethonTargetClient
++
++
++def make_client(reply_text: str = "Sukses", raise_on_get_response=None):
++    mock_response = MagicMock()
++    mock_response.raw_text = reply_text
++
++    mock_button_msg = MagicMock()
++    mock_button_msg.click = AsyncMock()
++
++    mock_conv = AsyncMock()
++    mock_conv.send_message = AsyncMock()
++    if raise_on_get_response:
++        mock_conv.get_response = AsyncMock(side_effect=raise_on_get_response)
++    else:
++        mock_conv.get_response = AsyncMock(side_effect=[mock_button_msg, mock_response])
++    mock_conv.__aenter__ = AsyncMock(return_value=mock_conv)
++    mock_conv.__aexit__ = AsyncMock(return_value=False)
++
++    mock_telethon = AsyncMock()
++    mock_telethon.get_entity = AsyncMock(return_value=MagicMock())
++    mock_telethon.conversation = MagicMock(return_value=mock_conv)
++
++    return mock_telethon
++
++
++@pytest.mark.asyncio
++async def test_sends_three_steps():
++    mock_response = MagicMock()
++    mock_response.raw_text = "Aktivasi berhasil"
++
++    mock_button_msg = MagicMock()
++    mock_button_msg.click = AsyncMock()
++
++    mock_conv = AsyncMock()
++    mock_conv.send_message = AsyncMock()
++    mock_conv.get_response = AsyncMock(side_effect=[mock_button_msg, mock_response])
++    mock_conv.__aenter__ = AsyncMock(return_value=mock_conv)
++    mock_conv.__aexit__ = AsyncMock(return_value=False)
++
++    mock_telethon = AsyncMock()
++    mock_telethon.get_entity = AsyncMock(return_value=MagicMock())
++    mock_telethon.conversation = MagicMock(return_value=mock_conv)
++
++    tc = TelethonTargetClient(mock_telethon, "@bot")
++
++    result = await tc.send_and_wait("Amrr Activator Pro Tool A12+", "SN123", 30.0)
++
++    assert result == "Aktivasi berhasil"
++    assert mock_conv.send_message.call_count == 2
++    mock_button_msg.click.assert_awaited_once_with(text="Amrr Activator Pro Tool A12+")
++
++
++@pytest.mark.asyncio
++async def test_timeout_raises():
++    client = make_client(raise_on_get_response=asyncio.TimeoutError())
++    tc = TelethonTargetClient(client, "@bot")
++
++    with pytest.raises(asyncio.TimeoutError):
++        await tc.send_and_wait("btn", "SN", 0.01)
+diff --git a/tests/test_worker.py b/tests/test_worker.py
+index caca2da..28f2ab7 100644
+--- a/tests/test_worker.py
++++ b/tests/test_worker.py
+@@ -1,64 +1,76 @@
+ import asyncio
+-
+ import pytest
+-
+-from sn_forwarder.store import RequestStore
++from sn_forwarder.balance import BalanceService
++from sn_forwarder.store import ProductStore, RequestStore, UserStore
+ from sn_forwarder.worker import RegistrationJob, RegistrationWorker
+ 
+ 
+-class FakeSettings:
+-    reply_timeout_seconds = 0.01
+-
+-    def render_target_command(self, sn: str) -> str:
+-        return f"/register {sn}"
+-
+-
+ class FakeTargetClient:
+     def __init__(self, reply: str | Exception) -> None:
+         self.reply = reply
+-        self.commands: list[str] = []
++        self.calls: list[tuple[str, str]] = []
+ 
+-    async def send_and_wait(self, command: str, timeout_seconds: float) -> str:
+-        self.commands.append(command)
++    async def send_and_wait(self, button_label: str, sn: str, timeout_seconds: float) -> str:
++        self.calls.append((button_label, sn))
+         if isinstance(self.reply, Exception):
+             raise self.reply
+         return self.reply
+ 
+ 
+-class FakeBot:
+-    def __init__(self) -> None:
+-        self.messages: list[tuple[int, str]] = []
+-
+-    async def send_message(self, chat_id: int, text: str) -> object:
+-        self.messages.append((chat_id, text))
+-        return object()
++def make_worker(tmp_path, reply: str | Exception = "OK"):
++    db = str(tmp_path / "db.sqlite3")
++    users = UserStore(db)
++    products = ProductStore(db)
++    uid = users.create_user("alice", "hash")
++    users._add_balance(uid, 200000)
++    pid = products.create_product("A12+", "Amrr Activator Pro Tool A12+", 50000)
++    store = RequestStore(db)
++    balance = BalanceService(db)
++    rid = store.create_order(uid, pid, "SN123", 50000)
++    job = RegistrationJob(
++        request_id=rid,
++        user_id=uid,
++        product_id=pid,
++        sn="SN123",
++        button_label="Amrr Activator Pro Tool A12+",
++        price_charged=50000,
++    )
++    target = FakeTargetClient(reply)
++    worker = RegistrationWorker(store, balance, target, reply_timeout_seconds=5.0)
++    return worker, job, store, users, uid
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_worker_sends_command_and_returns_reply(tmp_path):
+-    store = RequestStore(str(tmp_path / "requests.sqlite3"))
+-    target = FakeTargetClient("Register sukses")
+-    bot = FakeBot()
+-    worker = RegistrationWorker(FakeSettings(), store, target, bot)
++async def test_worker_success(tmp_path):
++    worker, job, store, users, uid = make_worker(tmp_path, "Aktivasi berhasil")
++    await worker.process_one(job)
++    assert store.get_request(job.request_id).status == "success"
++    assert store.get_request(job.request_id).reply_text == "Aktivasi berhasil"
++    assert users.get_by_id(uid).balance == 150000  # saldo tidak dikembalikan
+ 
+-    request_id = await worker.process_one(RegistrationJob(user_id=111, chat_id=222, sn="SN123"))
+ 
+-    assert target.commands == ["/register SN123"]
+-    assert bot.messages == [(222, "Register sukses")]
+-    assert store.get_request(request_id).status == "success"
++@pytest.mark.asyncio
++async def test_worker_timeout_refunds(tmp_path):
++    worker, job, store, users, uid = make_worker(tmp_path, asyncio.TimeoutError())
++    await worker.process_one(job)
++    assert store.get_request(job.request_id).status == "failed"
++    assert users.get_by_id(uid).balance == 200000  # saldo dikembalikan
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_worker_reports_timeout(tmp_path):
+-    store = RequestStore(str(tmp_path / "requests.sqlite3"))
+-    target = FakeTargetClient(asyncio.TimeoutError())
+-    bot = FakeBot()
+-    worker = RegistrationWorker(FakeSettings(), store, target, bot)
++async def test_worker_error_refunds(tmp_path):
++    worker, job, store, users, uid = make_worker(tmp_path, RuntimeError("koneksi gagal"))
++    await worker.process_one(job)
++    assert store.get_request(job.request_id).status == "failed"
++    assert users.get_by_id(uid).balance == 200000
+ 
+-    request_id = await worker.process_one(RegistrationJob(user_id=111, chat_id=222, sn="SN123"))
+-
+-    assert bot.messages == [(222, "Timeout: bot tujuan tidak membalas.")]
+-    record = store.get_request(request_id)
+-    assert record.status == "failed"
+-    assert record.error_text == "timeout"
+ 
++@pytest.mark.asyncio
++async def test_worker_enqueue_returns_qsize(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    store = RequestStore(db)
++    balance = BalanceService(db)
++    worker = RegistrationWorker(store, balance, FakeTargetClient("ok"), reply_timeout_seconds=5.0)
++    job = RegistrationJob(1, 1, 1, "SN", "btn", 50000)
++    size = await worker.enqueue(job)
++    assert size == 1

@@ -1,0 +1,590 @@
+diff --git a/README.md b/README.md
+index 8bb58e2..cf93231 100644
+--- a/README.md
++++ b/README.md
+@@ -1,110 +1,70 @@
+-# Telegram SN Forwarder Bot
++# SN Forwarder Platform
+ 
+-Bot ini berjalan di PC Windows Anda. Bot menerima `/reg <SN>`, mengirim command register ke bot Telegram tujuan memakai akun Telegram Anda melalui Telethon, lalu mengirim reply bot tujuan kembali ke user atau panel.
++Panel web multi-user untuk submit request ke bot Telegram via Telethon. Satu proses Python (FastAPI + Worker + Telethon) di PC lokal, diakses publik via Cloudflare Tunnel.
+ 
+-## Cara Kerja
++## Setup
+ 
+-```text
+-User / Panel -> Bot Telegram Anda -> Queue lokal -> Akun Telegram Anda via Telethon -> Bot tujuan
+-Bot tujuan -> Akun Telegram Anda via Telethon -> Bot Telegram Anda -> User / Panel
+-```
+-
+-Request diproses satu per satu supaya reply dari bot tujuan tidak tertukar.
+-
+-## Setup Windows
+-
+-1. Install Python 3.11 atau lebih baru dari https://www.python.org/downloads/windows/.
+-2. Buka PowerShell di folder project ini.
+-3. Buat virtual environment:
+-
+-```powershell
+-python -m venv .venv
+-.\.venv\Scripts\Activate.ps1
+-```
+-
+-Jika PowerShell menolak aktivasi script, jalankan:
++### 1. Install dependensi
+ 
+ ```powershell
+-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
++.\.venv\Scripts\pip install -r requirements.txt
+ ```
+ 
+-Lalu ulangi aktivasi virtual environment.
++### 2. Konfigurasi `.env`
+ 
+-4. Install dependency:
++Buat file `.env` di root project:
+ 
+-```powershell
+-python -m pip install -r requirements.txt
+ ```
+-
+-5. Copy `.env.example` menjadi `.env`.
+-6. Isi `.env`:
+-
+-```text
+-BOT_TOKEN=token_dari_botfather
+-API_ID=api_id_dari_my_telegram_org
+-API_HASH=api_hash_dari_my_telegram_org
+-OWNER_USER_IDS=user_id_telegram_anda
+-TARGET_BOT_USERNAME=@username_bot_tujuan
+-TARGET_COMMAND_TEMPLATE=/register {sn}
+-REPLY_TIMEOUT_SECONDS=60
+-DATABASE_PATH=data/requests.sqlite3
++API_ID=12345
++API_HASH=abcdef...
++TARGET_BOT_USERNAME=@NamaBotTujuan
+ TELETHON_SESSION_NAME=owner_session
++REPLY_TIMEOUT_SECONDS=60
++SESSION_SECRET=string_acak_panjang_min32karakter
++WEB_HOST=127.0.0.1
++WEB_PORT=8000
++DATABASE_PATH=sn_panel.db
+ ```
+ 
+-## Mengambil Credential Telegram
+-
+-- `BOT_TOKEN`: buat bot di BotFather, lalu copy token.
+-- `API_ID` dan `API_HASH`: login ke https://my.telegram.org, buka API development tools, lalu buat app.
+-- `OWNER_USER_IDS`: user ID Telegram yang boleh memakai bot. Anda bisa cek lewat bot seperti `@userinfobot`.
+-- `TARGET_BOT_USERNAME`: username bot Telegram tujuan, diawali `@`.
+-
+-## Menjalankan Bot
+-
+-Aktifkan virtual environment dulu:
+-
++Generate `SESSION_SECRET`:
+ ```powershell
+-.\.venv\Scripts\Activate.ps1
++.\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"
+ ```
+ 
+-Jalankan:
++### 3. Buat admin pertama
+ 
+ ```powershell
+ $env:PYTHONPATH='src'
+-python -m sn_forwarder.main
++.\.venv\Scripts\python -m sn_forwarder.setup_admin
+ ```
+ 
+-Saat pertama kali berjalan, Telethon akan meminta nomor HP Telegram, kode login, dan password 2FA jika aktif. Setelah login berhasil, file `owner_session.session` dibuat lokal. Login berikutnya tidak perlu kode lagi selama file session tidak dihapus.
+-
+-Bot hanya aktif selama terminal tetap terbuka, PC hidup, dan internet tersambung.
++### 4. Jalankan aplikasi
+ 
+-## Command
+-
+-```text
+-/start
+-/reg SN123456
++```powershell
++$env:PYTHONPATH='src'
++.\.venv\Scripts\python -m sn_forwarder.main
+ ```
+ 
+-Jika bot tujuan memakai format lain, ubah `TARGET_COMMAND_TEMPLATE` di `.env`.
++### 5. Akses publik via Cloudflare Tunnel
+ 
+-Contoh:
+-
+-```text
+-TARGET_COMMAND_TEMPLATE=/reg {sn}
+-TARGET_COMMAND_TEMPLATE=REGISTER {sn}
++Di terminal terpisah:
++```powershell
++cloudflared tunnel --url http://127.0.0.1:8000
+ ```
+ 
+-## Data Lokal
+-
+-- SQLite log request default: `data/requests.sqlite3`.
+-- Telethon session default: `owner_session.session`.
+-- `.env`, database, dan session file sudah masuk `.gitignore`.
++URL HTTPS muncul di terminal Cloudflare (mis. `https://xxxx.trycloudflare.com`).
+ 
+-Jangan kirim file `.env` atau `.session` ke orang lain karena bisa berisi akses akun.
++## Penggunaan
+ 
+-## Troubleshooting
++- Admin login → `/admin/users` → tambah user + set saldo
++- Admin → `/admin/products` → tambah produk (nama, button_label PERSIS di bot tujuan, harga)
++- User login → `/order` → pilih produk, isi SN → submit
++- Hasil muncul di `/history` (polling otomatis tiap 3 detik)
++- Saldo dipotong saat submit; refund otomatis jika gagal/timeout
+ 
+-- `Akses ditolak.`: user ID pengirim belum masuk `OWNER_USER_IDS`.
+-- `Format: /reg <SN>`: command kurang SN.
+-- `Timeout: bot tujuan tidak membalas.`: bot tujuan lambat, tidak aktif, atau format command salah.
+-- `Gagal memproses request. Cek log aplikasi.`: lihat error di terminal PowerShell.
++## Menjalankan tes
+ 
++```powershell
++$env:PYTHONPATH='src'
++.\.venv\Scripts\python -m pytest -q
++```
+diff --git a/src/sn_forwarder/main.py b/src/sn_forwarder/main.py
+index c53eefd..5627ad5 100644
+--- a/src/sn_forwarder/main.py
++++ b/src/sn_forwarder/main.py
+@@ -1,65 +1,72 @@
+ from __future__ import annotations
+ 
+ import asyncio
+-import contextlib
+ import logging
+ 
++import uvicorn
+ from telethon import TelegramClient
+ 
+-from .bot_app import build_application
++from .balance import BalanceService
+ from .config import load_settings
+-from .store import RequestStore
++from .store import ProductStore, RequestStore, UserStore
+ from .target_client import TelethonTargetClient
++from .web.app import build_web_app
+ from .worker import RegistrationWorker
+ 
+-
+-logging.basicConfig(
+-    level=logging.INFO,
+-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+-)
++logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+ logging.getLogger("httpx").setLevel(logging.WARNING)
+ logging.getLogger("httpcore").setLevel(logging.WARNING)
++logger = logging.getLogger(__name__)
+ 
+ 
+-async def async_main() -> None:
++async def main() -> None:
+     settings = load_settings()
+-    store = RequestStore(settings.database_path)
++
++    user_store = UserStore(settings.database_path)
++    product_store = ProductStore(settings.database_path)
++    request_store = RequestStore(settings.database_path)
++    balance_service = BalanceService(settings.database_path)
+ 
+     telethon_client = TelegramClient(
+         settings.telethon_session_name,
+         settings.api_id,
+         settings.api_hash,
+     )
++    await telethon_client.start()
++    logger.info("Telethon connected")
+ 
+-    async with telethon_client:
+-        target_client = TelethonTargetClient(telethon_client, settings.target_bot_username)
+-        worker = RegistrationWorker(settings, store, target_client, bot=None)
+-        app = build_application(settings, worker)
+-        worker.bot = app.bot
++    target_client = TelethonTargetClient(telethon_client, settings.target_bot_username)
+ 
+-        worker_task = asyncio.create_task(worker.run_forever())
+-        try:
+-            await app.initialize()
+-            await app.start()
+-            if app.updater is None:
+-                raise RuntimeError("Telegram bot updater is not available")
+-            await app.updater.start_polling()
+-            logging.info("Bot is running. Press Ctrl+C to stop.")
+-            await asyncio.Event().wait()
+-        finally:
+-            worker_task.cancel()
+-            with contextlib.suppress(asyncio.CancelledError):
+-                await worker_task
+-            if app.updater is not None and app.updater.running:
+-                await app.updater.stop()
+-            if app.running:
+-                await app.stop()
+-            await app.shutdown()
++    worker = RegistrationWorker(
++        store=request_store,
++        balance=balance_service,
++        target_client=target_client,
++        reply_timeout_seconds=settings.reply_timeout_seconds,
++    )
+ 
++    app = build_web_app(
++        settings=settings,
++        user_store=user_store,
++        product_store=product_store,
++        request_store=request_store,
++        balance_service=balance_service,
++        worker=worker,
++    )
+ 
+-def main() -> None:
+-    asyncio.run(async_main())
++    uvicorn_config = uvicorn.Config(
++        app,
++        host=settings.web_host,
++        port=settings.web_port,
++        log_level="info",
++    )
++    server = uvicorn.Server(uvicorn_config)
++
++    logger.info("Starting SN Forwarder Platform on http://%s:%d", settings.web_host, settings.web_port)
++    await asyncio.gather(
++        server.serve(),
++        worker.run_forever(),
++    )
+ 
+ 
+ if __name__ == "__main__":
+-    main()
++    asyncio.run(main())
+diff --git a/src/sn_forwarder/setup_admin.py b/src/sn_forwarder/setup_admin.py
+new file mode 100644
+index 0000000..01d61cc
+--- /dev/null
++++ b/src/sn_forwarder/setup_admin.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python3
++"""One-time script: create initial admin user."""
++from __future__ import annotations
++
++import getpass
++import sys
++
++from .config import load_settings
++from .store import UserStore
++from .web.auth import hash_password
++
++
++def main() -> None:
++    settings = load_settings()
++    user_store = UserStore(settings.database_path)
++
++    existing = user_store.list_all()
++    if any(u.role == "admin" for u in existing):
++        print("Admin sudah ada. Kelola user via panel /admin/users.")
++        sys.exit(0)
++
++    print("=== Setup Admin Pertama ===")
++    username = input("Username admin: ").strip()
++    if not username:
++        print("Username tidak boleh kosong.")
++        sys.exit(1)
++
++    password = getpass.getpass("Password: ")
++    confirm = getpass.getpass("Konfirmasi password: ")
++    if password != confirm:
++        print("Password tidak cocok.")
++        sys.exit(1)
++    if len(password) < 8:
++        print("Password minimal 8 karakter.")
++        sys.exit(1)
++
++    uid = user_store.create_user(username, hash_password(password), role="admin")
++    print(f"Admin '{username}' (id={uid}) berhasil dibuat.")
++    print("Jalankan: python -m sn_forwarder.main")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/sn_forwarder/web/app.py b/src/sn_forwarder/web/app.py
+index 820df4c..717f006 100644
+--- a/src/sn_forwarder/web/app.py
++++ b/src/sn_forwarder/web/app.py
+@@ -40,14 +40,13 @@ def build_web_app(
+ 
+     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+     TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+     (TEMPLATES_DIR / "admin").mkdir(exist_ok=True)
+     STATIC_DIR.mkdir(parents=True, exist_ok=True)
+ 
+-    if STATIC_DIR.exists() and any(STATIC_DIR.iterdir()):
+-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
++    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+ 
+     app.state.user_store = user_store
+     app.state.product_store = product_store
+     app.state.request_store = request_store
+     app.state.balance_service = balance_service
+     app.state.worker = worker
+@@ -63,36 +62,38 @@ def build_web_app(
+     async def not_authenticated_handler(request: Request, exc: NotAuthenticatedException) -> Response:
+         return RedirectResponse(url="/login", status_code=302)
+ 
+     @app.get("/login", response_class=HTMLResponse)
+     async def login_page(request: Request):
+         csrf = get_csrf_token(request)
+-        return templates.TemplateResponse("login.html", {"request": request, "csrf_token": csrf, "error": None})
++        return templates.TemplateResponse(request, "login.html", {"csrf_token": csrf, "error": None})
+ 
+     @app.post("/login")
+     async def login_post(request: Request):
+         form = await request.form()
+         username = str(form.get("username", "")).strip()
+         password = str(form.get("password", ""))
+         ip = request.client.host if request.client else "unknown"
+ 
+         if is_brute_forced(ip):
+             csrf = get_csrf_token(request)
+             return templates.TemplateResponse(
++                request,
+                 "login.html",
+-                {"request": request, "csrf_token": csrf, "error": "Terlalu banyak percobaan. Tunggu 5 menit."},
++                {"csrf_token": csrf, "error": "Terlalu banyak percobaan. Tunggu 5 menit."},
+                 status_code=429,
+             )
+ 
+         user = user_store.get_by_username(username)
+         if user is None or not verify_password(password, user.password_hash) or not user.is_active:
+             record_failed(ip)
+             csrf = get_csrf_token(request)
+             return templates.TemplateResponse(
++                request,
+                 "login.html",
+-                {"request": request, "csrf_token": csrf, "error": "Username atau password salah."},
++                {"csrf_token": csrf, "error": "Username atau password salah."},
+                 status_code=200,
+             )
+ 
+         login_user(request, user.id)
+         return RedirectResponse(url="/dashboard", status_code=302)
+ 
+diff --git a/src/sn_forwarder/web/routes_admin.py b/src/sn_forwarder/web/routes_admin.py
+index 31b3209..7341070 100644
+--- a/src/sn_forwarder/web/routes_admin.py
++++ b/src/sn_forwarder/web/routes_admin.py
+@@ -11,13 +11,13 @@ router = APIRouter()
+ @router.get("/users", response_class=HTMLResponse)
+ async def admin_users(request: Request):
+     require_admin(request, request.app.state.user_store)
+     users = request.app.state.user_store.list_all()
+     csrf = get_csrf_token(request)
+     return request.app.state.templates.TemplateResponse(
+-        "admin/users.html", {"request": request, "users": users, "csrf_token": csrf}
++        request, "admin/users.html", {"users": users, "csrf_token": csrf}
+     )
+ 
+ 
+ @router.post("/users")
+ async def admin_create_user(request: Request):
+     require_admin(request, request.app.state.user_store)
+@@ -52,13 +52,13 @@ async def admin_topup(user_id: int, request: Request):
+ @router.get("/products", response_class=HTMLResponse)
+ async def admin_products(request: Request):
+     require_admin(request, request.app.state.user_store)
+     products = request.app.state.product_store.list_all()
+     csrf = get_csrf_token(request)
+     return request.app.state.templates.TemplateResponse(
+-        "admin/products.html", {"request": request, "products": products, "csrf_token": csrf}
++        request, "admin/products.html", {"products": products, "csrf_token": csrf}
+     )
+ 
+ 
+ @router.post("/products")
+ async def admin_create_product(request: Request):
+     require_admin(request, request.app.state.user_store)
+@@ -87,8 +87,8 @@ async def admin_update_product(product_id: int, request: Request):
+ 
+ @router.get("/history", response_class=HTMLResponse)
+ async def admin_history(request: Request):
+     require_admin(request, request.app.state.user_store)
+     rows = request.app.state.request_store.get_all(limit=100)
+     return request.app.state.templates.TemplateResponse(
+-        "admin/history.html", {"request": request, "rows": rows}
++        request, "admin/history.html", {"rows": rows}
+     )
+diff --git a/src/sn_forwarder/web/routes_panel.py b/src/sn_forwarder/web/routes_panel.py
+index b9bb3dd..aafb724 100644
+--- a/src/sn_forwarder/web/routes_panel.py
++++ b/src/sn_forwarder/web/routes_panel.py
+@@ -11,24 +11,25 @@ router = APIRouter()
+ 
+ @router.get("/dashboard", response_class=HTMLResponse)
+ async def dashboard(request: Request):
+     user = require_user(request, request.app.state.user_store)
+     fresh = request.app.state.user_store.get_by_id(user.id)
+     return request.app.state.templates.TemplateResponse(
+-        "dashboard.html", {"request": request, "user": fresh}
++        request, "dashboard.html", {"user": fresh}
+     )
+ 
+ 
+ @router.get("/order", response_class=HTMLResponse)
+ async def order_page(request: Request):
+     user = require_user(request, request.app.state.user_store)
+     products = request.app.state.product_store.list_active()
+     csrf = get_csrf_token(request)
+     return request.app.state.templates.TemplateResponse(
++        request,
+         "order.html",
+-        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": None},
++        {"user": user, "products": products, "csrf_token": csrf, "error": None},
+     )
+ 
+ 
+ @router.post("/order")
+ async def order_post(request: Request):
+     user = require_user(request, request.app.state.user_store)
+@@ -73,23 +74,23 @@ async def order_post(request: Request):
+ @router.get("/history", response_class=HTMLResponse)
+ async def history(request: Request):
+     user = require_user(request, request.app.state.user_store)
+     rows = request.app.state.request_store.get_by_user(user.id, limit=50)
+     submitted = request.query_params.get("submitted")
+     return request.app.state.templates.TemplateResponse(
+-        "history.html", {"request": request, "user": user, "rows": rows, "submitted": submitted}
++        request, "history.html", {"user": user, "rows": rows, "submitted": submitted}
+     )
+ 
+ 
+ @router.get("/transactions", response_class=HTMLResponse)
+ async def transactions(request: Request):
+     user = require_user(request, request.app.state.user_store)
+     fresh = request.app.state.user_store.get_by_id(user.id)
+     txns = request.app.state.balance_service.get_transactions(user.id)
+     return request.app.state.templates.TemplateResponse(
+-        "transactions.html", {"request": request, "user": fresh, "txns": txns}
++        request, "transactions.html", {"user": fresh, "txns": txns}
+     )
+ 
+ 
+ @router.get("/api/request/{request_id}/status")
+ async def request_status(request_id: int, request: Request):
+     user = require_user(request, request.app.state.user_store)
+@@ -103,10 +104,11 @@ async def request_status(request_id: int, request: Request):
+ 
+ 
+ def _order_error(request: Request, user, message: str):
+     products = request.app.state.product_store.list_active()
+     csrf = get_csrf_token(request)
+     return request.app.state.templates.TemplateResponse(
++        request,
+         "order.html",
+-        {"request": request, "user": user, "products": products, "csrf_token": csrf, "error": message},
++        {"user": user, "products": products, "csrf_token": csrf, "error": message},
+         status_code=200,
+     )
+diff --git a/src/sn_forwarder/web/static/style.css b/src/sn_forwarder/web/static/style.css
+new file mode 100644
+index 0000000..faf038c
+--- /dev/null
++++ b/src/sn_forwarder/web/static/style.css
+@@ -0,0 +1,57 @@
++*, *::before, *::after { box-sizing: border-box; }
++
++body {
++  font-family: system-ui, -apple-system, sans-serif;
++  margin: 0;
++  background: #f5f5f5;
++  color: #222;
++}
++
++nav {
++  background: #1a73e8;
++  padding: 0.75rem 1.5rem;
++  display: flex;
++  gap: 1.5rem;
++  align-items: center;
++}
++
++nav a {
++  color: #fff;
++  text-decoration: none;
++  font-weight: 500;
++}
++
++nav a:hover { text-decoration: underline; }
++
++main {
++  max-width: 960px;
++  margin: 2rem auto;
++  padding: 0 1.5rem;
++}
++
++h1 { font-size: 1.6rem; margin-bottom: 1rem; }
++h2 { font-size: 1.2rem; margin-top: 1.5rem; }
++
++table { border-collapse: collapse; width: 100%; background: #fff; }
++th, td { border: 1px solid #ddd; padding: 0.5rem 0.75rem; text-align: left; }
++th { background: #f0f0f0; font-weight: 600; }
++tr:hover td { background: #fafafa; }
++
++input, select, button {
++  padding: 0.4rem 0.75rem;
++  border: 1px solid #ccc;
++  border-radius: 4px;
++  font-size: 0.95rem;
++}
++
++button {
++  background: #1a73e8;
++  color: #fff;
++  border-color: #1a73e8;
++  cursor: pointer;
++}
++
++button:hover { background: #1558b0; }
++
++.error { color: #c62828; margin: 0.5rem 0; }
++.success { color: #2e7d32; margin: 0.5rem 0; }
+diff --git a/src/sn_forwarder/web/templates/base.html b/src/sn_forwarder/web/templates/base.html
+index 0324cdc..57bb755 100644
+--- a/src/sn_forwarder/web/templates/base.html
++++ b/src/sn_forwarder/web/templates/base.html
+@@ -1,15 +1,24 @@
+ <!DOCTYPE html>
+ <html>
+-<head><meta charset="utf-8"><title>SN Panel</title></head>
++<head>
++  <meta charset="utf-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1">
++  <title>SN Panel</title>
++  <link rel="stylesheet" href="/static/style.css">
++</head>
+ <body>
+ <nav>
+-  <a href="/dashboard">Dashboard</a> |
+-  <a href="/order">Order</a> |
+-  <a href="/history">History</a> |
++  <a href="/dashboard">Dashboard</a>
++  <a href="/order">Order</a>
++  <a href="/history">History</a>
+   <a href="/transactions">Transaksi</a>
+-  {% if user and user.role == 'admin' %} | <a href="/admin/users">Admin</a>{% endif %} |
++  {% if user and user.role == 'admin' %}
++  <a href="/admin/users">Admin Users</a>
++  <a href="/admin/products">Admin Produk</a>
++  <a href="/admin/history">Admin History</a>
++  {% endif %}
+   <a href="/logout">Logout</a>
+ </nav>
+ <main>{% block content %}{% endblock %}</main>
+ </body>
+ </html>

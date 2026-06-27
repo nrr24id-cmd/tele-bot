@@ -1,0 +1,144 @@
+diff --git a/src/sn_forwarder/balance.py b/src/sn_forwarder/balance.py
+new file mode 100644
+index 0000000..54b476e
+--- /dev/null
++++ b/src/sn_forwarder/balance.py
+@@ -0,0 +1,66 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++from .store import _init_all_tables, _make_connection
++
++
++@dataclass(frozen=True)
++class TransactionRecord:
++    id: int
++    user_id: int
++    type: str
++    amount: int
++    balance_after: int
++    ref_request_id: int | None
++    note: str | None
++    created_at: str
++
++
++class BalanceService:
++    def __init__(self, database_path: str) -> None:
++        self.database_path = database_path
++        _init_all_tables(database_path)
++
++    def topup(self, user_id: int, amount: int, note: str = "") -> None:
++        conn = _make_connection(self.database_path)
++        try:
++            conn.execute("BEGIN")
++            conn.execute("UPDATE users SET balance=balance+? WHERE id=?", (amount, user_id))
++            new_bal = conn.execute("SELECT balance FROM users WHERE id=?", (user_id,)).fetchone()[0]
++            conn.execute(
++                "INSERT INTO transactions (user_id,type,amount,balance_after,note) VALUES (?,'topup',?,?,?)",
++                (user_id, amount, new_bal, note or None),
++            )
++            conn.execute("COMMIT")
++        except Exception:
++            conn.execute("ROLLBACK")
++            raise
++        finally:
++            conn.close()
++
++    def refund(self, user_id: int, amount: int, ref_request_id: int) -> None:
++        conn = _make_connection(self.database_path)
++        try:
++            conn.execute("BEGIN")
++            conn.execute("UPDATE users SET balance=balance+? WHERE id=?", (amount, user_id))
++            new_bal = conn.execute("SELECT balance FROM users WHERE id=?", (user_id,)).fetchone()[0]
++            conn.execute(
++                "INSERT INTO transactions (user_id,type,amount,balance_after,ref_request_id) VALUES (?,'refund',?,?,?)",
++                (user_id, amount, new_bal, ref_request_id),
++            )
++            conn.execute("COMMIT")
++        except Exception:
++            conn.execute("ROLLBACK")
++            raise
++        finally:
++            conn.close()
++
++    def get_transactions(self, user_id: int, limit: int = 50) -> list[TransactionRecord]:
++        conn = _make_connection(self.database_path)
++        rows = conn.execute(
++            "SELECT * FROM transactions WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
++            (user_id, limit),
++        ).fetchall()
++        conn.close()
++        return [TransactionRecord(**dict(r)) for r in rows]
+diff --git a/tests/test_balance.py b/tests/test_balance.py
+new file mode 100644
+index 0000000..25eac60
+--- /dev/null
++++ b/tests/test_balance.py
+@@ -0,0 +1,66 @@
++import pytest
++from sn_forwarder.balance import BalanceService
++from sn_forwarder.store import UserStore, ProductStore, RequestStore
++
++
++def test_topup_increases_balance(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    users = UserStore(db)
++    balance = BalanceService(db)
++    uid = users.create_user("alice", "hash")
++
++    balance.topup(uid, 100000, "manual topup")
++
++    assert users.get_by_id(uid).balance == 100000
++
++
++def test_topup_records_transaction(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    users = UserStore(db)
++    balance = BalanceService(db)
++    uid = users.create_user("alice", "hash")
++    balance.topup(uid, 50000, "test")
++
++    txns = balance.get_transactions(uid)
++    assert len(txns) == 1
++    assert txns[0].type == "topup"
++    assert txns[0].amount == 50000
++    assert txns[0].balance_after == 50000
++    assert txns[0].note == "test"
++
++
++def test_refund_increases_balance(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    users = UserStore(db)
++    products = ProductStore(db)
++    requests = RequestStore(db)
++    balance = BalanceService(db)
++    uid = users.create_user("alice", "hash")
++    users._add_balance(uid, 200000)
++    pid = products.create_product("A12+", "btn", 50000)
++    rid = requests.create_order(uid, pid, "SN123", 50000)
++    # after order: balance = 200000 - 50000 = 150000
++
++    balance.refund(uid, 50000, ref_request_id=rid)
++    # after refund: balance = 150000 + 50000 = 200000
++
++    assert users.get_by_id(uid).balance == 200000
++
++
++def test_refund_records_transaction(tmp_path):
++    db = str(tmp_path / "db.sqlite3")
++    users = UserStore(db)
++    products = ProductStore(db)
++    requests = RequestStore(db)
++    balance = BalanceService(db)
++    uid = users.create_user("alice", "hash")
++    users._add_balance(uid, 200000)
++    pid = products.create_product("A12+", "btn", 50000)
++    rid = requests.create_order(uid, pid, "SN123", 50000)
++    balance.refund(uid, 50000, ref_request_id=rid)
++
++    txns = balance.get_transactions(uid)
++    # Most recent transaction should be refund
++    refund_txn = next((t for t in txns if t.type == "refund"), None)
++    assert refund_txn is not None
++    assert refund_txn.ref_request_id == rid
