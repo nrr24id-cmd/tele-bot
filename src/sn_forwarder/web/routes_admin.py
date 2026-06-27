@@ -92,3 +92,32 @@ async def admin_history(request: Request):
     return request.app.state.templates.TemplateResponse(
         request, "admin/history.html", {"rows": rows}
     )
+
+
+@router.get("/apikeys", response_class=HTMLResponse)
+async def admin_apikeys(request: Request):
+    require_admin(request, request.app.state.user_store)
+    keys = request.app.state.api_key_store.list_all()
+    users = request.app.state.user_store.list_all()
+    csrf = get_csrf_token(request)
+    return request.app.state.templates.TemplateResponse(
+        request, "admin/apikeys.html", {"keys": keys, "users": users, "csrf_token": csrf}
+    )
+
+
+@router.post("/apikeys")
+async def admin_create_apikey(request: Request):
+    require_admin(request, request.app.state.user_store)
+    form = await request.form()
+    user_id = int(form.get("user_id", 0))
+    label = str(form.get("label", "")).strip()
+    if user_id:
+        request.app.state.api_key_store.create(user_id, label)
+    return RedirectResponse(url="/admin/apikeys", status_code=302)
+
+
+@router.post("/apikeys/{key_id}/revoke")
+async def admin_revoke_apikey(key_id: int, request: Request):
+    require_admin(request, request.app.state.user_store)
+    request.app.state.api_key_store.revoke(key_id)
+    return RedirectResponse(url="/admin/apikeys", status_code=302)

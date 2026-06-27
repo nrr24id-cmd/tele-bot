@@ -8,12 +8,17 @@ from telethon import TelegramClient
 
 from .balance import BalanceService
 from .config import load_settings
-from .store import ProductStore, RequestStore, UserStore
+from .store import ApiKeyStore, ProductStore, RequestStore, UserStore
 from .target_client import TelethonTargetClient
 from .web.app import build_web_app
 from .worker import RegistrationWorker
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+_log_formatter = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+_file_handler = logging.FileHandler("sn_panel.log", encoding="utf-8")
+_file_handler.setFormatter(_log_formatter)
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_log_formatter)
+logging.basicConfig(level=logging.INFO, handlers=[_console_handler, _file_handler])
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ async def main() -> None:
     product_store = ProductStore(settings.database_path)
     request_store = RequestStore(settings.database_path)
     balance_service = BalanceService(settings.database_path)
+    api_key_store = ApiKeyStore(settings.database_path)
 
     telethon_client = TelegramClient(
         settings.telethon_session_name,
@@ -51,6 +57,7 @@ async def main() -> None:
         request_store=request_store,
         balance_service=balance_service,
         worker=worker,
+        api_key_store=api_key_store,
     )
 
     uvicorn_config = uvicorn.Config(

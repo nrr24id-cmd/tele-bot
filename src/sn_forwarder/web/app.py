@@ -10,7 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from ..balance import BalanceService
 from ..config import Settings
-from ..store import ProductStore, RequestStore, UserStore
+from ..store import ApiKeyStore, ProductStore, RequestStore, UserStore
 from .auth import (
     NotAuthenticatedException,
     get_csrf_token,
@@ -34,6 +34,7 @@ def build_web_app(
     request_store: RequestStore,
     balance_service: BalanceService,
     worker,
+    api_key_store: ApiKeyStore | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
     app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
@@ -51,12 +52,15 @@ def build_web_app(
     app.state.balance_service = balance_service
     app.state.worker = worker
     app.state.templates = templates
+    app.state.api_key_store = api_key_store
 
     from .routes_panel import router as panel_router
     from .routes_admin import router as admin_router
+    from .routes_api import router as api_router
 
     app.include_router(panel_router)
     app.include_router(admin_router, prefix="/admin")
+    app.include_router(api_router)
 
     @app.exception_handler(NotAuthenticatedException)
     async def not_authenticated_handler(request: Request, exc: NotAuthenticatedException) -> Response:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,16 @@ class RequestWithProduct:
     created_at: str
 
 
+@dataclass(frozen=True)
+class ApiKeyRecord:
+    id: int
+    user_id: int
+    api_key: str
+    label: str | None
+    is_active: int
+    created_at: str
+
+
 def _make_connection(database_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(database_path, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -105,6 +116,14 @@ def _init_all_tables(database_path: str) -> None:
             balance_after INTEGER NOT NULL,
             ref_request_id INTEGER REFERENCES requests(id),
             note TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            api_key TEXT NOT NULL UNIQUE,
+            label TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     """)
@@ -305,3 +324,45 @@ class RequestStore:
         )
         conn.execute("COMMIT")
         conn.close()
+
+
+class ApiKeyStore:
+    def __init__(self, database_path: str) -> None:
+        _init_all_tables(database_path)
+        self._db = database_path
+
+    def create(self, user_id: int, label: str = "") -> str:
+        api_key = secrets.token_hex(24)
+        conn = _make_connection(self._db)
+        conn.execute(
+            "INSERT INTO api_keys (user_id, api_key, label) VALUES (?, ?, ?)",
+            (user_id, api_key, label),
+        )
+        conn.commit()
+        return api_key
+
+    def get_by_key(self, api_key: str) -> ApiKeyRecord | None:
+        conn = _make_connection(self._db)
+        row = conn.execute(
+            "SELECT * FROM api_keys WHERE api_key=? AND is_active=1", (api_key,)
+        ).fetchone()
+        return ApiKeyRecord(**dict(row)) if row else None
+
+    def list_by_user(self, user_id: int) -> list[ApiKeyRecord]:
+        conn = _make_connection(self._db)
+        rows = conn.execute(
+            "SELECT * FROM api_keys WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+        ).fetchall()
+        return [ApiKeyRecord(**dict(r)) for r in rows]
+
+    def list_all(self) -> list[ApiKeyRecord]:
+        conn = _make_connection(self._db)
+        rows = conn.execute(
+            "SELECT * FROM api_keys ORDER BY created_at DESC"
+        ).fetchall()
+        return [ApiKeyRecord(**dict(r)) for r in rows]
+
+    def revoke(self, key_id: int) -> None:
+        conn = _make_connection(self._db)
+        conn.execute("UPDATE api_keys SET is_active=0 WHERE id=?", (key_id,))
+        conn.commit()

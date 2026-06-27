@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>API Keys</h1>
+<h2>Generate API Key</h2>
+<form method="post" action="/admin/apikeys">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <select name="user_id">
+    {% for u in users %}
+    <option value="{{ u.id }}">{{ u.username }}</option>
+    {% endfor %}
+  </select>
+  <input name="label" placeholder="Label (opsional)">
+  <button type="submit">Generate</button>
+</form>
+<h2>Daftar API Keys</h2>
+<table border="1" cellpadding="6">
+  <tr><th>ID</th><th>User ID</th><th>API Key</th><th>Label</th><th>Status</th><th>Aksi</th></tr>
+  {% for k in keys %}
+  <tr>
+    <td>{{ k.id }}</td><td>{{ k.user_id }}</td>
+    <td><code>{{ k.api_key }}</code></td>
+    <td>{{ k.label or '-' }}</td>
+    <td>{{ 'Aktif' if k.is_active else 'Dicabut' }}</td>
+    <td>
+      {% if k.is_active %}
+      <form method="post" action="/admin/apikeys/{{ k.id }}/revoke" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">Cabut</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<hr>
+<h2>Cara Pakai</h2>
+<p>API URL: <code>{{ request.url.scheme }}://{{ request.url.netloc }}/wrapper/api/index.php</code></p>
+<p>Actions: <code>services</code>, <code>order</code>, <code>status</code>, <code>balance</code></p>
+{% endblock %}
