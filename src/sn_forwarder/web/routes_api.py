@@ -1,121 +1,128 @@
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from ..store import ApiKeyStore, ProductStore, RequestStore
-from ..balance import BalanceService
+from ..store import ApiKeyStore
 from ..worker import RegistrationJob
 
 router = APIRouter()
 
 STATUS_MAP = {
-    "pending": "Pending",
-    "processing": "Processing",
-    "success": "Completed",
-    "failed": "Cancelled",
+    "pending": "0",
+    "processing": "1",
+    "failed": "3",
+    "success": "4",
 }
 
 
-def _auth(request: Request, api_key: str) -> bool:
+def _auth(request: Request, username: str, api_key: str):
     store: ApiKeyStore = request.app.state.api_key_store
-    record = store.get_by_key(api_key)
-    return record is not None
+    if not store:
+        return None
+    records = store.list_all()
+    for r in records:
+        if r.api_key == api_key and r.is_active:
+            user = request.app.state.user_store.get_by_id(r.user_id)
+            if user and user.username == username:
+                return user
+    return None
 
 
-@router.post("/wrapper/api/index.php")
-async def dhru_api(request: Request):
+def _err(msg: str, status: int = 400):
+    return JSONResponse({"ERROR": [{"MESSAGE": msg}]}, status_code=status)
+
+
+@router.post("/api")
+async def imore_api(request: Request):
     form = await request.form()
-    api_key = str(form.get("key", ""))
-    action = str(form.get("action", ""))
+    username = str(form.get("username", "")).strip()
+    api_key = str(form.get("apiaccesskey", "")).strip()
+    action = str(form.get("action", "")).strip()
 
-    if not _auth(request, api_key):
-        return JSONResponse({"error": "Invalid API key"}, status_code=401)
+    if not username or not api_key:
+        return _err("Credentials required", 401)
 
-    key_record = request.app.state.api_key_store.get_by_key(api_key)
-    user_id = key_record.user_id
+    user = _auth(request, username, api_key)
+    if user is None:
+        return _err("Invalid credentials", 401)
 
-    if action == "balance":
-        user = request.app.state.user_store.get_by_id(user_id)
-        return JSONResponse({"balance": str(user.balance), "currency": "IDR"})
+    if action == "accountinfo":
+        return JSONResponse({"SUCCESS": [{
+            "MESSAGE": "OK",
+            "BALANCE": str(user.balance),
+            "CURRENCY": "IDR",
+            "mail": user.username,
+        }]})
 
-    elif action == "services":
+    elif action == "imeiservicelist":
         products = request.app.state.product_store.list_active()
-        return JSONResponse([
-            {
-                "service": str(p.id),
-                "name": p.name,
-                "type": "sim",
-                "rate": str(p.price),
-                "min": "1",
-                "max": "1",
-                "dripfeed": "0",
-                "refill": "0",
-                "cancel": "0",
-                "category": "SN Activation",
-            }
-            for p in products
-        ])
+        services = [{
+            "SERVICEID": f"svc_{p.id}",
+            "SERVICENAME": p.name,
+            "CREDIT": str(p.price),
+            "TYPE": "SN",
+        } for p in products]
+        return JSONResponse({"SUCCESS": [{"MESSAGE": "Service List", "SERVICES": services}]})
 
-    elif action == "order":
-        service_id_raw = form.get("service", "")
-        sn = str(form.get("serial", "")).strip()
+    elif action == "placeimeiorder":
+        service_id_raw = str(form.get("SERVICEID", "")).strip()
+        sn = str(form.get("SN", "") or form.get("IMEI", "")).strip()
+
+        if not service_id_raw.startswith("svc_"):
+            return _err("Service not found or inactive", 404)
 
         try:
-            product_id = int(service_id_raw)
+            product_id = int(service_id_raw[4:])
         except (ValueError, TypeError):
-            return JSONResponse({"error": "Invalid service"}, status_code=400)
+            return _err("Service not found or inactive", 404)
 
         product = request.app.state.product_store.get_by_id(product_id)
         if not product or not product.is_active:
-            return JSONResponse({"error": "Service not found"}, status_code=404)
+            return _err("Service not found or inactive", 404)
 
         if not sn:
-            return JSONResponse({"error": "Serial number required"}, status_code=400)
+            return _err("IMEI/SN required", 400)
 
         request_id = request.app.state.request_store.create_order(
-            user_id, product.id, sn, product.price
+            user.id, product.id, sn, product.price
         )
         if request_id is None:
-            return JSONResponse({"error": "Insufficient balance"}, status_code=402)
+            return _err("Insufficient balance", 402)
 
         job = RegistrationJob(
             request_id=request_id,
-            user_id=user_id,
+            user_id=user.id,
             product_id=product.id,
             sn=sn,
             button_label=product.button_label,
             price_charged=product.price,
         )
         await request.app.state.worker.enqueue(job)
-        return JSONResponse({"order": str(request_id)})
+        return JSONResponse({"SUCCESS": [{"MESSAGE": "Order placed", "ID": f"ord_{request_id}"}]})
 
-    elif action == "status":
-        order_id_raw = form.get("orderid", "")
+    elif action == "getimeiorder":
+        order_id_raw = str(form.get("ID", "")).strip()
+        if order_id_raw.startswith("ord_"):
+            order_id_raw = order_id_raw[4:]
         try:
             order_id = int(order_id_raw)
         except (ValueError, TypeError):
-            return JSONResponse({"error": "Invalid order ID"}, status_code=400)
+            return _err("Order not found", 404)
 
         try:
             record = request.app.state.request_store.get_request(order_id)
-        except (KeyError, Exception):
-            return JSONResponse({"error": "Order not found"}, status_code=404)
+        except Exception:
+            return _err("Order not found", 404)
 
-        if record.user_id != user_id:
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
+        if record.user_id != user.id:
+            return _err("Order not found", 404)
 
-        return JSONResponse({
-            "order": str(record.id),
-            "status": STATUS_MAP.get(record.status, record.status),
-            "charge": str(record.price_charged),
-            "start_count": "0",
-            "remains": "0",
-            "currency": "IDR",
-            "answer": record.reply_text or record.error_text or "",
-        })
+        return JSONResponse({"SUCCESS": [{
+            "STATUS": STATUS_MAP.get(record.status, "0"),
+            "CODE": record.reply_text or record.error_text or "",
+            "ID": f"ord_{record.id}",
+        }]})
 
     else:
-        return JSONResponse({"error": "Unknown action"}, status_code=400)
+        return _err("Unknown action", 400)
