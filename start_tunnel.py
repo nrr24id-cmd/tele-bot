@@ -5,8 +5,8 @@ import urllib.request
 import urllib.parse
 import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8937114437:AAF_ocBnoKX2B6GJtR1T2Lxi2gcdw4xIKFE")
-CHAT_ID = os.getenv("OWNER_USER_IDS", "1830728158")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "xxxxx")
+CHAT_ID = os.getenv("OWNER_USER_IDS", "xxxxxx")
 
 CLOUDFLARED = os.path.join(os.path.dirname(__file__), "cloudflared.exe")
 
