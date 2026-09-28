@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 import uvicorn
 from telethon import TelegramClient
@@ -13,8 +14,9 @@ from .target_client import TelethonTargetClient
 from .web.app import build_web_app
 from .worker import RegistrationWorker
 
+_LOG_FILE = Path(__file__).resolve().parents[3] / "sn_panel.log"
 _log_formatter = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
-_file_handler = logging.FileHandler("sn_panel.log", encoding="utf-8")
+_file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
 _file_handler.setFormatter(_log_formatter)
 _console_handler = logging.StreamHandler()
 _console_handler.setFormatter(_log_formatter)
