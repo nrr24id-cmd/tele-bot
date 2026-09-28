@@ -217,6 +217,14 @@ button:hover { background: var(--ink-soft); }
   color: var(--ink);
 }
 
+.txn-id {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted-2);
+  margin-left: 0.3rem;
+}
+
 .txn-meta {
   margin-top: 0.15rem;
   font-size: 0.78rem;

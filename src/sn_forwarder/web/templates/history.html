@@ -32,7 +32,7 @@
   <div class="txn">
     <div class="txn-glyph {{ r.status }}">{{ glyph }}</div>
     <div class="txn-main">
-      <div class="txn-type">{{ r.product_name }}</div>
+      <div class="txn-type">{{ r.product_name }} <span class="txn-id">#{{ r.id }}</span></div>
       <div class="txn-meta">
         <span class="ref">{{ r.sn }}</span>
         {% if r.reply_text or r.error_text %}

@@ -17,7 +17,7 @@
   <div class="txn">
     <div class="txn-glyph {{ 'debit' if is_debit else 'credit' }}">{{ '↓' if is_debit else '↑' }}</div>
     <div class="txn-main">
-      <div class="txn-type">{{ t.type|capitalize }}</div>
+      <div class="txn-type">{{ t.type|capitalize }} <span class="txn-id">#{{ t.id }}</span></div>
       <div class="txn-meta">
         <span class="ref">{{ 'Ref ' + t.ref_request_id|string if t.ref_request_id else '—' }}</span>
         <span class="time">{{ t.created_at }}</span>
