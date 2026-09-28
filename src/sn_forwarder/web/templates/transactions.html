@@ -1,16 +1,38 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Riwayat Transaksi</h1>
-<p>Saldo saat ini: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
-<table border="1" cellpadding="6">
-  <tr><th>#</th><th>Tipe</th><th>Jumlah</th><th>Saldo Setelah</th><th>Ref</th><th>Waktu</th></tr>
+<div class="balance-band">
+  <p class="balance-label">SALDO SAAT INI</p>
+  <div class="balance-figure"><span class="cur">Rp</span>{{ "{:,.0f}".format(user.balance) }}</div>
+</div>
+
+<div class="section-head">
+  <h2>Riwayat Transaksi</h2>
+  <span class="count">{{ txns|length }} transaksi</span>
+</div>
+
+{% if txns %}
+<div class="statement">
   {% for t in txns %}
-  <tr>
-    <td>{{ t.id }}</td><td>{{ t.type }}</td>
-    <td>Rp {{ "{:,.0f}".format(t.amount) }}</td>
-    <td>Rp {{ "{:,.0f}".format(t.balance_after) }}</td>
-    <td>{{ t.ref_request_id or '-' }}</td><td>{{ t.created_at }}</td>
-  </tr>
+  {% set is_debit = t.type == 'debit' %}
+  <div class="txn">
+    <div class="txn-glyph {{ 'debit' if is_debit else 'credit' }}">{{ '↓' if is_debit else '↑' }}</div>
+    <div class="txn-main">
+      <div class="txn-type">{{ t.type }}</div>
+      <div class="txn-meta">
+        <span class="ref">{{ 'Ref ' + t.ref_request_id|string if t.ref_request_id else '—' }}</span>
+        <span class="time">{{ t.created_at }}</span>
+      </div>
+    </div>
+    <div class="txn-amounts">
+      <div class="txn-amount {{ 'debit' if is_debit else 'credit' }}">{{ '−' if is_debit else '+' }}Rp {{ "{:,.0f}".format(t.amount) }}</div>
+      <div class="txn-after">sisa Rp {{ "{:,.0f}".format(t.balance_after) }}</div>
+    </div>
+  </div>
   {% endfor %}
-</table>
+</div>
+{% else %}
+<div class="statement">
+  <div class="empty">Belum ada transaksi.</div>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,24 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SN Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav>
-  <a href="/dashboard">Dashboard</a>
-  <a href="/order">Order</a>
-  <a href="/history">History</a>
-  <a href="/transactions">Transaksi</a>
+<div class="topbar">
+  <a href="/dashboard" class="brand">SN Panel</a>
+  <div class="topbar-right">
+    <span class="topbar-user">{{ user.username if user else '' }}</span>
+    <a href="/logout" class="logout">Logout</a>
+  </div>
+</div>
+<nav class="tabs">
+  <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' }}">Dashboard</a>
+  <a href="/order" class="{{ 'active' if request.url.path == '/order' }}">Order</a>
+  <a href="/history" class="{{ 'active' if request.url.path == '/history' }}">History</a>
+  <a href="/transactions" class="{{ 'active' if request.url.path == '/transactions' }}">Transaksi</a>
   {% if user and user.role == 'admin' %}
-  <a href="/admin/users">Admin Users</a>
-  <a href="/admin/products">Admin Produk</a>
-  <a href="/admin/history">Admin History</a>
-  <a href="/admin/apikeys">API Keys</a>
+  <a href="/admin/users" class="{{ 'active' if request.url.path == '/admin/users' }}">Users</a>
+  <a href="/admin/products" class="{{ 'active' if request.url.path == '/admin/products' }}">Produk</a>
+  <a href="/admin/history" class="{{ 'active' if request.url.path == '/admin/history' }}">History Semua</a>
+  <a href="/admin/apikeys" class="{{ 'active' if request.url.path == '/admin/apikeys' }}">API Keys</a>
   {% endif %}
-  <a href="/logout">Logout</a>
 </nav>
 <main>{% block content %}{% endblock %}</main>
 </body>
