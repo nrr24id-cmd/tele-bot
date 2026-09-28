@@ -1,19 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Order Baru</h1>
-{% if error %}<p style="color:red">{{ error }}</p>{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
 <form method="post" action="/order">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <p>
-    <label>Produk:
-      <select name="product_id">
-        {% for p in products %}
-        <option value="{{ p.id }}">{{ p.name }} — Rp {{ "{:,.0f}".format(p.price) }}</option>
-        {% endfor %}
-      </select>
-    </label>
-  </p>
-  <p><label>Serial Number: <input name="sn" required></label></p>
-  <button type="submit">Submit</button>
+
+  <div class="field">
+    <label for="product_id">Produk</label>
+    <select name="product_id" id="product_id">
+      {% for p in products %}
+      <option value="{{ p.id }}">{{ p.name }} — Rp {{ "{:,.0f}".format(p.price) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="sn">Serial Number</label>
+    <input name="sn" id="sn" required placeholder="Masukkan SN perangkat">
+  </div>
+
+  <button type="submit" class="btn-primary">Submit Order</button>
 </form>
 {% endblock %}

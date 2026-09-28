@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Dashboard</h1>
-<p>Selamat datang, <strong>{{ user.username }}</strong></p>
-<p>Saldo: <strong>Rp {{ "{:,.0f}".format(user.balance) }}</strong></p>
-<a href="/order"><button>Order Baru</button></a>
+<p class="greeting">Halo, <span>{{ user.username }}</span></p>
+
+<div class="balance-band">
+  <p class="balance-label">SALDO SAAT INI</p>
+  <div class="balance-figure"><span class="cur">Rp</span>{{ "{:,.0f}".format(user.balance) }}</div>
+</div>
+
+<a href="/order" class="btn-primary">Order Baru</a>
 {% endblock %}

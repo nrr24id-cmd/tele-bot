@@ -8,6 +8,7 @@
   --muted-2: #9CA3AF;
   --debit: #B23A2B;
   --credit: #1C7A52;
+  --info: #2563EB;
   --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 }
@@ -214,7 +215,6 @@ button:hover { background: var(--ink-soft); }
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink);
-  text-transform: capitalize;
 }
 
 .txn-meta {
@@ -254,6 +254,106 @@ button:hover { background: var(--ink-soft); }
   text-align: center;
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.txn-glyph.pending { background: rgba(107, 114, 128, 0.1); color: var(--muted); }
+.txn-glyph.processing { background: rgba(37, 99, 235, 0.1); color: var(--info); }
+
+/* ── greeting (dashboard) ──────────────────────────────────── */
+
+.greeting {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 1.2rem;
+}
+
+.greeting span { color: var(--muted); font-weight: 400; }
+
+/* ── forms (order page) ────────────────────────────────────── */
+
+.field { margin-bottom: 1.1rem; }
+
+.field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.4rem;
+}
+
+.field select, .field input {
+  width: 100%;
+  min-height: 46px;
+}
+
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+  background: var(--ink);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: var(--sans);
+}
+
+.btn-primary:hover { background: var(--ink-soft); color: #fff; }
+
+/* ── alerts ───────────────────────────────────────────────── */
+
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 1.1rem;
+  border: 1px solid transparent;
+}
+
+.alert-error {
+  background: rgba(178, 58, 43, 0.08);
+  color: var(--debit);
+  border-color: rgba(178, 58, 43, 0.25);
+}
+
+.alert-info {
+  background: rgba(18, 24, 43, 0.04);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* ── status badges (history page) ────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.badge-pending { background: rgba(107, 114, 128, 0.12); color: var(--muted); }
+.badge-processing { background: rgba(37, 99, 235, 0.1); color: var(--info); }
+.badge-success { background: rgba(28, 122, 82, 0.1); color: var(--credit); }
+.badge-failed { background: rgba(178, 58, 43, 0.1); color: var(--debit); }
+
+.txn-meta .ref {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.txn-meta .reply {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--muted);
 }
 
 @media (min-width: 640px) {
